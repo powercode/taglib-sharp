@@ -16,6 +16,8 @@ public class Id3V2Test
 	static readonly string[] val_gnre = {"Rap",
 		"Jazz", "Non-Genre", "Blues"};
 
+	static readonly string val_url = "https://example.com/data";
+
 	[TestMethod]
 	public void TestTitle ()
 	{
@@ -1574,6 +1576,43 @@ public class Id3V2Test
 				for (int i = 0; i < val_mult.Length; i++) {
 					Assert.AreEqual (val_mult[i], g.Text[i], m);
 				}
+			});
+	}
+
+	[TestMethod]
+	public void TestUrlLinkFrame ()
+	{
+		var frame = new UrlLinkFrame ("WPUB") {
+			Url = val_url
+		};
+
+		FrameTest (frame, 3,
+			delegate (Frame f, StringType e) { },
+			(d, v) => new UrlLinkFrame (d, v),
+
+			delegate (Frame f, string m) {
+				var g = (f as UrlLinkFrame);
+				Assert.AreEqual ("WPUB", g.FrameId, m);
+				Assert.AreEqual (val_url, g.Url, m);
+			});
+	}
+
+	[TestMethod]
+	public void TestUserUrlLinkFrame ()
+	{
+		var frame = new UserUrlLinkFrame (val_sing) {
+			Url = val_url
+		};
+
+		FrameTest (frame, 3,
+			delegate (Frame f, StringType e) { },
+			(d, v) => new UserUrlLinkFrame (d, v),
+
+			delegate (Frame f, string m) {
+				var g = (f as UserUrlLinkFrame);
+				Assert.AreEqual ("WXXX", g.FrameId, m);
+				Assert.AreEqual (val_sing, g.Description, m);
+				Assert.AreEqual (val_url, g.Url, m);
 			});
 	}
 

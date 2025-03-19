@@ -423,18 +423,18 @@ namespace TagLib.Id3v2
 		{
 			if (ident == null)
 				throw new ArgumentNullException (nameof (ident));
-
+			
 			if (ident.Count != 4)
 				throw new ArgumentException ("Identifier must be four bytes long.",
 					nameof (ident));
 
 			bool empty = true;
 
-			if (text != null)
+			if (text != null){
 				for (int i = 0; empty && i < text.Length; i++)
 					if (!string.IsNullOrEmpty (text[i]))
 						empty = false;
-
+			}
 			if (empty) {
 				RemoveFrames (ident);
 				return;
@@ -442,12 +442,21 @@ namespace TagLib.Id3v2
 
 			// Handle URL Link frames differently
 			if (ident[0] == 'W') {
-				var urlFrame = UrlLinkFrame.Get (this, ident, true);
+				
+				var urlLinkFrame = UrlLinkFrame.Get (this, ident, true);
+				var isUserUrlLink = ident[1] == 'X';
+				if (isUserUrlLink) {
+					if (text is { Length: < 2 })
+						throw new ArgumentException ("text must have at least two elements when writing an UrlLinkFrame");
 
-				urlFrame.Text = text;
-				urlFrame.TextEncoding = DefaultEncoding;
-				return;
-			}
+					var userUrlLinkFrame = (UserUrlLinkFrame)urlLinkFrame;
+					userUrlLinkFrame.DescriptionEncoding = DefaultEncoding;
+					userUrlLinkFrame.Description = text[0];
+					userUrlLinkFrame.Url = text[1];
+				} else {
+					urlLinkFrame.Url = text[0];
+				}
+			} 
 
 			var frame = TextInformationFrame.Get (this, ident, true);
 
