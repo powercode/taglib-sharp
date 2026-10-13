@@ -140,8 +140,8 @@ public static class AddImageMetadataTests
 		file.ImageTag.Longitude = 3.0;
 		file.ImageTag.Altitude = 3.0;
 
-		Assert.AreEqual (test_comment, file.ImageTag.Comment);
-		Assert.AreEqual (keywords, file.ImageTag.Keywords);
+		Assert.AreSequenceEqual (test_comment, file.ImageTag.Comment);
+		Assert.AreSequenceEqual (keywords, file.ImageTag.Keywords);
 		Assert.AreEqual (4u, file.ImageTag.Rating);
 		Assert.AreEqual (date_time, file.ImageTag.DateTime);
 		Assert.AreEqual (3.0, file.ImageTag.Latitude);
@@ -154,8 +154,8 @@ public static class AddImageMetadataTests
 
 		Assert.IsNotNull (file, "tmp file");
 
-		Assert.AreEqual (test_comment, file.ImageTag.Comment);
-		Assert.AreEqual (keywords, file.ImageTag.Keywords);
+		Assert.AreSequenceEqual (test_comment, file.ImageTag.Comment);
+		Assert.AreSequenceEqual (keywords, file.ImageTag.Keywords);
 		Assert.AreEqual (4u, file.ImageTag.Rating);
 		Assert.AreEqual (date_time, file.ImageTag.DateTime);
 		Assert.AreEqual (3.0, file.ImageTag.Latitude);
@@ -164,8 +164,8 @@ public static class AddImageMetadataTests
 
 		var xmp_tag = file.GetTag (TagTypes.XMP, false) as XmpTag;
 		Assert.IsNotNull (xmp_tag, "XMP Tag not read");
-		Assert.AreEqual (test_comment, xmp_tag.Comment);
-		Assert.AreEqual (keywords, xmp_tag.Keywords);
+		Assert.AreSequenceEqual (test_comment, xmp_tag.Comment);
+		Assert.AreSequenceEqual (keywords, xmp_tag.Keywords);
 		Assert.AreEqual (4u, xmp_tag.Rating);
 
 		var ifd_tag = file.GetTag (TagTypes.TiffIFD, false) as IFDTag;

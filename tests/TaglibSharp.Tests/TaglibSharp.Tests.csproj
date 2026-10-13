@@ -1,8 +1,7 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="MSTest.Sdk">
 
 	<PropertyGroup>
-		<TargetFrameworks>net8.0;net9.0</TargetFrameworks>
-		<TargetFrameworks Condition="'$(IsLinux)' != 'true'">net472;$(TargetFrameworks)</TargetFrameworks>
+		<TargetFrameworks>net9.0;net10.0;net11.0</TargetFrameworks>
 		<EnableMSTestRunner>true</EnableMSTestRunner>
 		<OutputType>Exe</OutputType>
 		<TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
@@ -14,7 +13,6 @@
 	</ItemGroup>
 
 	<ItemGroup>
-		<PackageReference Include="MSTest" />
 		<PackageReference Include="SixLabors.ImageSharp" />
 	</ItemGroup>
 
