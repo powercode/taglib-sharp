@@ -12,7 +12,7 @@
 		<RepositoryType>git</RepositoryType>
 
 		<ExeTargetFrameworks>net472;net8.0;net9.0</ExeTargetFrameworks>
-		<LibTargetFrameworks>netstandard2.0;net8.0;net9.0</LibTargetFrameworks>
+		<LibTargetFrameworks>netstandard2.0;net8.0;net9.0;net10.0;net11.0</LibTargetFrameworks>
 		<TreatWarningsAsErrors>true</TreatWarningsAsErrors>
 		<ImplicitUsings>true</ImplicitUsings>
 		<EnableNETAnalyzers>true</EnableNETAnalyzers>
