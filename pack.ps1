@@ -5,8 +5,16 @@ param(
 
 dotnet build .\src\TaglibSharp -c $Configuration
 
-dotnet test -c Debug  .\tests\TaglibSharp.Tests\TaglibSharp.Tests.csproj
+Push-Location .\tests\TaglibSharp.Tests
+try{
+	dotnet test -c Debug --verbosity minimal TaglibSharp.Tests.csproj
+}
+finally{
+	Pop-Location
+}
 
-if ($?) {
+if ($LASTExitCode -eq 0) {
 	dotnet pack .\src\TaglibSharp --no-build -c $Configuration
+
+	Get-Item .\artifacts\package\$Configuration\*
 }
