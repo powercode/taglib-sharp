@@ -32,6 +32,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
 
 namespace TagLib
@@ -250,17 +251,18 @@ namespace TagLib
 		///    A <see cref="int" /> value specifying the number of bytes
 		///    to be copied to the new instance.
 		/// </param>
+		/// <exception cref="ArgumentNullException">
+		///    <paramref name="data" /> is <see langword="null" />.
+		/// </exception>
 		/// <exception cref="ArgumentOutOfRangeException">
 		///    <paramref name="length" /> is less than zero or greater
 		///    than the length of the data.
 		/// </exception>
 		public ByteVector (byte[] data, int length)
 		{
-			if (length > data.Length)
-				throw new ArgumentOutOfRangeException (nameof (length), "Length exceeds size of data.");
-
-			if (length < 0)
-				throw new ArgumentOutOfRangeException (nameof (length), "Length is less than zero.");
+			ArgumentNullException.ThrowIfNull (data);
+			ArgumentOutOfRangeException.ThrowIfGreaterThan (length, data.Length);
+			ArgumentOutOfRangeException.ThrowIfNegative (length);
 
 			if (length == data.Length) {
 				this.data.AddRange (data);
@@ -311,8 +313,7 @@ namespace TagLib
 		/// </exception>
 		public ByteVector (int size, byte value)
 		{
-			if (size < 0)
-				throw new ArgumentOutOfRangeException (nameof (size), "Size is less than zero.");
+			ArgumentOutOfRangeException.ThrowIfNegative (size);
 
 			if (size == 0)
 				return;
@@ -426,17 +427,16 @@ namespace TagLib
 		/// </param>
 		/// <exception cref="ArgumentOutOfRangeException">
 		///    <paramref name="startIndex" /> is less than zero or
-		///    greater than or equal to <see cref="Count" />. OR
+		///    greater than <see cref="Count" />. OR
 		///    <paramref name="length" /> is less than zero or greater
 		///    than the amount of available data.
 		/// </exception>
 		public ByteVector Mid (int startIndex, int length)
 		{
-			if (startIndex < 0 || startIndex > Count)
-				throw new ArgumentOutOfRangeException (nameof (startIndex));
-
-			if (length < 0 || startIndex + length > Count)
-				throw new ArgumentOutOfRangeException (nameof (length));
+			ArgumentOutOfRangeException.ThrowIfNegative (startIndex);
+			ArgumentOutOfRangeException.ThrowIfGreaterThan (startIndex, Count);
+			ArgumentOutOfRangeException.ThrowIfNegative (length);
+			ArgumentOutOfRangeException.ThrowIfGreaterThan (length, Count - startIndex);
 
 			if (length == 0)
 				return new ByteVector ();
@@ -493,6 +493,8 @@ namespace TagLib
 		///    difference between the position and <paramref
 		///    name="offset" /> will be divisible by <paramref
 		///    name="byteAlign" />.
+		///    An empty pattern matches at <paramref name="offset" />
+		///    if it is no greater than <see cref="Count" />.
 		/// </returns>
 		/// <exception cref="ArgumentNullException">
 		///    <paramref name="pattern" /> is <see langword="null" />.
@@ -503,18 +505,12 @@ namespace TagLib
 		/// </exception>
 		public int Find (ByteVector pattern, int offset, int byteAlign)
 		{
-			if (pattern == null)
-				throw new ArgumentNullException (nameof (pattern));
-
-			if (offset < 0)
-				throw new ArgumentOutOfRangeException (nameof (offset), "offset must be at least 0.");
-
-			if (byteAlign < 1)
-				throw new ArgumentOutOfRangeException (nameof (byteAlign), "byteAlign must be at least 1.");
+			ArgumentNullException.ThrowIfNull (pattern);
+			ArgumentOutOfRangeException.ThrowIfNegative (offset);
+			ArgumentOutOfRangeException.ThrowIfLessThan (byteAlign, 1);
 
 			if (pattern.Count > Count - offset)
 				return -1;
-
 			// Let's go ahead and special case a pattern of size one
 			// since that's common and easy to make fast.
 
@@ -611,8 +607,8 @@ namespace TagLib
 		///    to search for in the current instance.
 		/// </param>
 		/// <param name="offset">
-		///    A <see cref="int"/> value specifying the index in the
-		///    current instance at which to start searching.
+		///    A <see cref="int"/> value specifying the number of bytes
+		///    to exclude from the end of the current instance.
 		/// </param>
 		/// <param name="byteAlign">
 		///    A <see cref="int"/> value specifying the byte alignment
@@ -631,15 +627,14 @@ namespace TagLib
 		///    <paramref name="pattern" /> is <see langword="null" />.
 		/// </exception>
 		/// <exception cref="ArgumentOutOfRangeException">
-		///    <paramref name="offset" /> is less than zero.
+		///    <paramref name="offset" /> is less than zero or
+		///    <paramref name="byteAlign" /> is less than 1.
 		/// </exception>
 		public int RFind (ByteVector pattern, int offset, int byteAlign)
 		{
-			if (pattern == null)
-				throw new ArgumentNullException (nameof (pattern));
-
-			if (offset < 0)
-				throw new ArgumentOutOfRangeException (nameof (offset));
+			ArgumentNullException.ThrowIfNull (pattern);
+			ArgumentOutOfRangeException.ThrowIfNegative (offset);
+			ArgumentOutOfRangeException.ThrowIfLessThan (byteAlign, 1);
 
 			if (pattern.Count == 0 || pattern.Count > Count - offset)
 				return -1;
@@ -681,8 +676,8 @@ namespace TagLib
 		///    to search for in the current instance.
 		/// </param>
 		/// <param name="offset">
-		///    A <see cref="int"/> value specifying the index in the
-		///    current instance at which to start searching.
+		///    A <see cref="int"/> value specifying the number of bytes
+		///    to exclude from the end of the current instance.
 		/// </param>
 		/// <returns>
 		///    A <see cref="int"/> value containing the index at which
@@ -750,8 +745,7 @@ namespace TagLib
 		/// </exception>
 		public bool ContainsAt (ByteVector pattern, int offset, int patternOffset, int patternLength)
 		{
-			if (pattern == null)
-				throw new ArgumentNullException (nameof (pattern));
+			ArgumentNullException.ThrowIfNull (pattern);
 
 			if (pattern.Count < patternLength) {
 				patternLength = pattern.Count;
@@ -864,8 +858,7 @@ namespace TagLib
 		/// </exception>
 		public bool EndsWith (ByteVector pattern)
 		{
-			if (pattern == null)
-				throw new ArgumentNullException (nameof (pattern));
+			ArgumentNullException.ThrowIfNull (pattern);
 
 			return ContainsAt (pattern, data.Count - pattern.Count);
 		}
@@ -888,8 +881,7 @@ namespace TagLib
 		/// </remarks>
 		public int EndsWithPartialMatch (ByteVector pattern)
 		{
-			if (pattern == null)
-				throw new ArgumentNullException (nameof (pattern));
+			ArgumentNullException.ThrowIfNull (pattern);
 
 			if (pattern.Count > data.Count) {
 				return -1;
@@ -1463,6 +1455,11 @@ namespace TagLib
 		/// </exception>
 		public string ToString (StringType type, int offset, int count)
 		{
+			ArgumentOutOfRangeException.ThrowIfNegative (offset);
+			ArgumentOutOfRangeException.ThrowIfGreaterThan (offset, Count);
+			ArgumentOutOfRangeException.ThrowIfNegative (count);
+			ArgumentOutOfRangeException.ThrowIfGreaterThan (count, Count - offset);
+
 			if (offset < 0 || offset > Count)
 				throw new ArgumentOutOfRangeException (nameof (offset));
 
@@ -1619,10 +1616,10 @@ namespace TagLib
 				position += align;
 			}
 
-			return list.ToArray ();
+			return list.ToArray();
 		}
 
-		#endregion
+#endregion
 
 
 
@@ -1696,11 +1693,8 @@ namespace TagLib
 		/// </exception>
 		public static bool operator < (ByteVector first, ByteVector second)
 		{
-			if (first == null)
-				throw new ArgumentNullException (nameof (first));
-
-			if (second == null)
-				throw new ArgumentNullException (nameof (second));
+			ArgumentNullException.ThrowIfNull (first);
+			ArgumentNullException.ThrowIfNull (second);
 
 			return first.CompareTo (second) < 0;
 		}
@@ -1726,11 +1720,8 @@ namespace TagLib
 		/// </exception>
 		public static bool operator <= (ByteVector first, ByteVector second)
 		{
-			if (first == null)
-				throw new ArgumentNullException (nameof (first));
-
-			if (second == null)
-				throw new ArgumentNullException (nameof (second));
+			ArgumentNullException.ThrowIfNull (first);
+			ArgumentNullException.ThrowIfNull (second);
 
 			return first.CompareTo (second) <= 0;
 		}
@@ -1756,11 +1747,8 @@ namespace TagLib
 		/// </exception>
 		public static bool operator > (ByteVector first, ByteVector second)
 		{
-			if (first == null)
-				throw new ArgumentNullException (nameof (first));
-
-			if (second == null)
-				throw new ArgumentNullException (nameof (second));
+			ArgumentNullException.ThrowIfNull (first);
+			ArgumentNullException.ThrowIfNull (second);
 
 			return first.CompareTo (second) > 0;
 		}
@@ -1786,11 +1774,8 @@ namespace TagLib
 		/// </exception>
 		public static bool operator >= (ByteVector first, ByteVector second)
 		{
-			if (first == null)
-				throw new ArgumentNullException (nameof (first));
-
-			if (second == null)
-				throw new ArgumentNullException (nameof (second));
+			ArgumentNullException.ThrowIfNull (first);
+			ArgumentNullException.ThrowIfNull (second);
 
 			return first.CompareTo (second) >= 0;
 		}
@@ -2266,8 +2251,7 @@ namespace TagLib
 		/// </exception>
 		internal static ByteVector FromPath (string path, out byte[] firstChunk, bool copyFirstChunk)
 		{
-			if (path == null)
-				throw new ArgumentNullException (nameof (path));
+			ArgumentNullException.ThrowIfNull (path);
 
 			return FromFile (new File.LocalFileAbstraction (path), out firstChunk, copyFirstChunk);
 		}
@@ -2320,8 +2304,7 @@ namespace TagLib
 		/// </exception>
 		internal static ByteVector FromFile (File.IFileAbstraction abstraction, out byte[] firstChunk, bool copyFirstChunk)
 		{
-			if (abstraction == null)
-				throw new ArgumentNullException (nameof (abstraction));
+			ArgumentNullException.ThrowIfNull (abstraction);
 
 			var stream = abstraction.ReadStream;
 			var output = FromStream (stream, out firstChunk, copyFirstChunk);
@@ -2375,6 +2358,8 @@ namespace TagLib
 		/// </exception>
 		internal static ByteVector FromStream (Stream stream, out byte[] firstChunk, bool copyFirstChunk)
 		{
+			ArgumentNullException.ThrowIfNull (stream);
+
 			var vector = new ByteVector ();
 			byte[] bytes = new byte[4096];
 			int read_size = bytes.Length;
@@ -2583,10 +2568,12 @@ namespace TagLib
 		///    greater than zero if the current instance is greater than
 		///    <paramref name="other" />.
 		/// </returns>
+		/// <exception cref="ArgumentNullException">
+		///    <paramref name="other" /> is <see langword="null" />.
+		/// </exception>
 		public int CompareTo (ByteVector other)
 		{
-			if (other is null)
-				throw new ArgumentNullException (nameof (other));
+			ArgumentNullException.ThrowIfNull (other);
 
 			int diff = Count - other.Count;
 
