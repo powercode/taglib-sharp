@@ -8,7 +8,7 @@
 
 	<PropertyGroup>
 		<UseArtifactsOutput>true</UseArtifactsOutput>
-		<ReleaseVersion>2.5.1.0</ReleaseVersion>
+		<ReleaseVersion>2.5.2.0</ReleaseVersion>
 		<RepositoryUrl>https://github.com/mono/taglib-sharp</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 
