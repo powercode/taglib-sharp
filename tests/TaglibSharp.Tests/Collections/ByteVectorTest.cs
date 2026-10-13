@@ -32,7 +32,7 @@ public class ByteVectorTest
 
 		var vector = ByteVector.FromStream (stream);
 
-		CollectionAssert.AreEqual (source.AsSpan (13).ToArray (), vector.Data);
+		Assert.AreSequenceEqual (source.AsSpan (13).ToArray (), vector.Data);
 		Assert.AreEqual (stream.Length, stream.Position);
 		Assert.IsTrue (stream.CanRead);
 		var field = typeof (ByteVector).GetField ("data", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -53,7 +53,7 @@ public class ByteVectorTest
 		new Random (42).NextBytes (source);
 		using var stream = new TestReadStream (source, canSeek, maxRead);
 
-		CollectionAssert.AreEqual (source, ByteVector.FromStream (stream).Data);
+		Assert.AreSequenceEqual (source, ByteVector.FromStream (stream).Data);
 		Assert.AreEqual (1, stream.EndOfStreamReads);
 		Assert.IsTrue (stream.CanRead);
 	}
@@ -68,7 +68,7 @@ public class ByteVectorTest
 		new Random (42).NextBytes (source);
 		using var stream = new TestReadStream (source, reportedLength: reportedLength);
 
-		CollectionAssert.AreEqual (source, ByteVector.FromStream (stream).Data);
+		Assert.AreSequenceEqual (source, ByteVector.FromStream (stream).Data);
 		Assert.AreEqual (1, stream.EndOfStreamReads);
 	}
 
@@ -101,11 +101,11 @@ public class ByteVectorTest
 
 		var vector = (ByteVector)method.Invoke (null, arguments);
 
-		CollectionAssert.AreEqual (source, vector.Data);
+		Assert.AreSequenceEqual (source, vector.Data);
 		if (copyFirstChunk) {
 			byte[] expected = new byte[4096];
 			source.AsSpan (0, Math.Min (4096, Math.Min (length, maxRead))).CopyTo (expected);
-			CollectionAssert.AreEqual (expected, (byte[])arguments[1]);
+			Assert.AreSequenceEqual (expected, (byte[])arguments[1]);
 		} else {
 			Assert.IsNull (arguments[1]);
 		}
@@ -134,7 +134,7 @@ public class ByteVectorTest
 		new Random (42).NextBytes (source);
 		using var stream = new TestReadStream (source);
 
-		CollectionAssert.AreEqual (source, ByteVector.FromStream (stream).Data);
+		Assert.AreSequenceEqual (source, ByteVector.FromStream (stream).Data);
 		Assert.AreEqual (2, stream.ReadCalls);
 	}
 
@@ -159,7 +159,7 @@ public class ByteVectorTest
 		long allocation = GC.GetAllocatedBytesForCurrentThread () - before;
 
 		Assert.AreEqual (baselineAllocation, allocation);
-		CollectionAssert.AreEqual (source, vector.Data);
+		Assert.AreSequenceEqual (source, vector.Data);
 		GC.KeepAlive (baseline);
 	}
 
@@ -282,11 +282,9 @@ public class ByteVectorTest
 			() => ByteVector.FromString ("A", StringType.UTF8, -1)).ParamName);
 		Assert.AreEqual (0, ByteVector.FromString (null, StringType.UTF8, -1).Count);
 		Assert.AreEqual (0, ByteVector.FromString ("", StringType.UTF8, -1).Count);
-		CollectionAssert.AreEqual (new byte[] { 0xff, 0xfe },
-			ByteVector.FromString (null, StringType.UTF16, -1).Data);
-		CollectionAssert.AreEqual (new byte[] { 0xff, 0xfe },
-			ByteVector.FromString ("", StringType.UTF16, -1).Data);
-		CollectionAssert.AreEqual (Encoding.UTF8.GetBytes ("AB"), ByteVector.FromString ("ABC", 2).Data);
+		Assert.AreSequenceEqual (new byte[] { 0xff, 0xfe }, ByteVector.FromString (null, StringType.UTF16, -1).Data);
+		Assert.AreSequenceEqual (new byte[] { 0xff, 0xfe }, ByteVector.FromString ("", StringType.UTF16, -1).Data);
+		Assert.AreSequenceEqual (Encoding.UTF8.GetBytes ("AB"), ByteVector.FromString ("ABC", 2).Data);
 	}
 
 	[TestMethod]
@@ -310,7 +308,7 @@ public class ByteVectorTest
 		var vector = new ByteVector (source);
 		source[0] = 4;
 
-		CollectionAssert.AreEqual (new byte[] { 1, 2, 3 }, vector.Data);
+		Assert.AreSequenceEqual (new byte[] { 1, 2, 3 }, vector.Data);
 		var field = typeof (ByteVector).GetField ("data", BindingFlags.Instance | BindingFlags.NonPublic);
 		var storage = (List<byte>)field.GetValue (vector);
 		Assert.AreEqual (source.Length, storage.Capacity);
@@ -326,12 +324,9 @@ public class ByteVectorTest
 	public void FromStringAcceptsSpans (StringType type)
 	{
 		ReadOnlySpan<char> text = "XA\u00e9\u20ac\U0001f600Z".AsSpan (1, 5);
-		CollectionAssert.AreEqual (ByteVector.FromString (text.ToString (), type).Data,
-			ByteVector.FromString (text, type).Data);
-		CollectionAssert.AreEqual (ByteVector.FromString (text.ToString (), type, 4).Data,
-			ByteVector.FromString (text, type, 4).Data);
-		CollectionAssert.AreEqual (ByteVector.FromString ("", type).Data,
-			ByteVector.FromString (ReadOnlySpan<char>.Empty, type).Data);
+		Assert.AreSequenceEqual (ByteVector.FromString (text.ToString (), type).Data, ByteVector.FromString (text, type).Data);
+		Assert.AreSequenceEqual (ByteVector.FromString (text.ToString (), type, 4).Data, ByteVector.FromString (text, type, 4).Data);
+		Assert.AreSequenceEqual (ByteVector.FromString ("", type).Data, ByteVector.FromString (ReadOnlySpan<char>.Empty, type).Data);
 	}
 
 	[TestMethod]
@@ -357,7 +352,7 @@ public class ByteVectorTest
 		long allocation = GC.GetAllocatedBytesForCurrentThread () - before;
 
 		Assert.AreEqual (baselineAllocation, allocation);
-		CollectionAssert.AreEqual (expected, vector.Data);
+		Assert.AreSequenceEqual (expected, vector.Data);
 		GC.KeepAlive (baseline);
 	}
 
@@ -738,6 +733,81 @@ public class ByteVectorTest
 				vector.Add (ByteVector.FromULong (55));
 			}
 		}
+	}
+
+	[TestMethod]
+	[DataRow (StringType.Latin1)]
+	[DataRow (StringType.UTF8)]
+	[DataRow (StringType.UTF16)]
+	[DataRow (StringType.UTF16BE)]
+	[DataRow (StringType.UTF16LE)]
+	public void ToStringsHandlesInlineBufferAndSpillover (StringType type)
+	{
+		foreach (int count in new[] { 0, 1, 2, 3, 4, 5, 8, 9, 17 }) {
+			string[] expected = Enumerable.Range (0, count).Select (i => $"value{i}").ToArray ();
+			var vector = new ByteVector ((byte)0xff);
+			if (count != 0)
+				vector.Add (ByteVector.FromString (string.Join ("\0", expected), type));
+
+			Assert.AreSequenceEqual (expected, vector.ToStrings (type, 1));
+		}
+	}
+
+	[TestMethod]
+	[DataRow (StringType.Latin1)]
+	[DataRow (StringType.UTF8)]
+	[DataRow (StringType.UTF16)]
+	[DataRow (StringType.UTF16BE)]
+	[DataRow (StringType.UTF16LE)]
+	public void ToStringsHonorsCountAndPreservesRemainder (StringType type)
+	{
+		var vector = new ByteVector ((byte)0xff);
+		vector.Add (ByteVector.FromString ("a\0b\0c\0d\0e\0f", type));
+
+		Assert.AreSequenceEqual (new[] { "a\0b\0c\0d\0e\0f" }, vector.ToStrings (type, 1, 1));
+		Assert.AreSequenceEqual (new[] { "a", "b", "c\0d\0e\0f" }, vector.ToStrings (type, 1, 3));
+		Assert.AreSequenceEqual (new[] { "a", "b", "c", "d\0e\0f" }, vector.ToStrings (type, 1, 4));
+		Assert.AreSequenceEqual (new[] { "a", "b", "c", "d", "e\0f" }, vector.ToStrings (type, 1, 5));
+		Assert.AreSequenceEqual (new[] { "a", "b", "c", "d", "e", "f" }, vector.ToStrings (type, 1, 10));
+		Assert.AreEqual (0, vector.ToStrings (type, 1, 0).Length);
+		Assert.AreEqual (0, vector.ToStrings (type, vector.Count).Length);
+	}
+
+	[TestMethod]
+	[DataRow (StringType.Latin1)]
+	[DataRow (StringType.UTF8)]
+	[DataRow (StringType.UTF16)]
+	[DataRow (StringType.UTF16BE)]
+	[DataRow (StringType.UTF16LE)]
+	public void ToStringsPreservesEmptyEntriesAndIgnoresTrailingDelimiter (StringType type)
+	{
+		var vector = ByteVector.FromString ("\0a\0\0b\0\0c\0", type);
+		Assert.AreSequenceEqual (new[] { "", "a", "", "b", "", "c" }, vector.ToStrings (type, 0));
+	}
+
+	[TestMethod]
+	[DataRow (0)]
+	[DataRow (1)]
+	[DataRow (2)]
+	[DataRow (3)]
+	[DataRow (4)]
+	public void ToStringsAllocatesOnlyFinalArrayForSmallEmptyResults (int count)
+	{
+		var vector = new ByteVector (new byte[count]);
+		for (int i = 0; i < 100; ++i)
+			vector.ToStrings (StringType.UTF8, 0);
+
+		long before = GC.GetAllocatedBytesForCurrentThread ();
+		var baseline = count == 0 ? Array.Empty<string> () : new string[count];
+		long baselineAllocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		before = GC.GetAllocatedBytesForCurrentThread ();
+		var result = vector.ToStrings (StringType.UTF8, 0);
+		long allocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		Assert.AreEqual (baselineAllocation, allocation);
+		Assert.AreSequenceEqual (Enumerable.Repeat (string.Empty, count).ToArray (), result);
+		GC.KeepAlive (baseline);
 	}
 
 	[TestMethod]

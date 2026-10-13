@@ -32,6 +32,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
 
@@ -1618,12 +1619,18 @@ namespace TagLib
 		/// <returns>
 		///    A <see cref="T:string[]" /> containing the converted text.
 		/// </returns>
+		/// <remarks>
+		///    Up to four strings are buffered inline without allocating a
+		///    temporary collection. Larger results use a dynamically sized list.
+		/// </remarks>
 		public string[] ToStrings (StringType type, int offset, int count)
 		{
 			int chunk = 0;
 			int position = offset;
 
-			var list = new List<string> ();
+			StringBuffer inlineBuffer = default;
+			Span<string> buffer = inlineBuffer;
+			List<string> list = null;
 			var separator = TextDelimiter (type);
 			int align = separator.Count;
 
@@ -1631,10 +1638,9 @@ namespace TagLib
 				int start = position;
 
 				if (chunk + 1 == count) {
-					position = offset + count;
+					position = Count;
 				} else {
-					position = Find (separator, start,
-						align);
+					position = Find (separator, start, align);
 
 					if (position < 0)
 						position = Count;
@@ -1642,23 +1648,39 @@ namespace TagLib
 
 				int length = position - start;
 
-				if (length == 0) {
-					list.Add (string.Empty);
-				} else {
-					string s = ToString (type, start,
-						length);
+				string s = string.Empty;
+				if (length != 0) {
+					s = ToString (type, start, length);
 					if (s.Length != 0 && (s[0] == 0xfffe ||
 						s[0] == 0xfeff)) { // UTF16 BOM
 						s = s.Substring (1);
 					}
 
+				}
+
+				if (chunk < buffer.Length) {
+					buffer[chunk] = s;
+				} else {
+					if (list == null) {
+						list = new List<string> (buffer.Length * 2);
+						foreach (string value in buffer)
+							list.Add (value);
+					}
+
 					list.Add (s);
 				}
 
+				++chunk;
 				position += align;
 			}
 
-			return list.ToArray();
+			return list != null ? list.ToArray () : buffer[..chunk].ToArray ();
+		}
+
+		[InlineArray (4)]
+		struct StringBuffer
+		{
+			string element;
 		}
 
 #endregion
