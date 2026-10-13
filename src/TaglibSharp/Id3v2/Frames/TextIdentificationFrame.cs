@@ -10,7 +10,7 @@
 //
 // Copyright (C) 2005-2007 Brian Nickel
 // Copyright (C) 2002,2003 Scott Wheeler (Original Implementation)
-// 
+//
 // This library is free software; you can redistribute it and/or modify
 // it  under the terms of the GNU Lesser General Public License version
 // 2.1 as published by the Free Software Foundation.
@@ -45,7 +45,7 @@ namespace TagLib.Id3v2
 	///    <para>The following table contains types and descriptions as
 	///    found in the ID3 2.4.0 native frames specification. (Copyright
 	///    (C) Martin Nilsson 2000.)</para>
-	///    
+	///
 	///    <list type="table">
 	///       <listheader>
 	///          <term>ID</term>
@@ -382,7 +382,7 @@ namespace TagLib.Id3v2
 		/// <summary>
 		///    Contains the text fields.
 		/// </summary>
-		string[] text_fields = new string[0];
+		string[] text_fields = [];
 
 		/// <summary>
 		///    Contains the raw data from the frame, or <see
@@ -544,13 +544,13 @@ namespace TagLib.Id3v2
 		public virtual string[] Text {
 			get {
 				ParseRawData ();
-				return (string[])text_fields.Clone ();
+				return text_fields.Length == 0 ? [] : (string[])text_fields.Clone ();
 			}
 			set {
 				raw_data = null;
-				text_fields = value != null ?
+				text_fields = value is { Length: > 0 } ?
 					(string[])value.Clone () :
-					new string[0];
+					[];
 			}
 		}
 
@@ -1160,7 +1160,7 @@ namespace TagLib.Id3v2
 			get {
 				string[] text = base.Text;
 				if (text.Length < 2)
-					return new string[0];
+					return [];
 
 				string[] new_text = new string[text.Length - 1];
 				for (int i = 0; i < new_text.Length; i++)
