@@ -837,6 +837,9 @@ namespace TagLib.Id3v2
 		///    property or method is called which requires the data,
 		///    this method is called, and only on the first call does it
 		///    actually parse the data.
+		///    Null-separated fields reuse the decoder's array unless trailing
+		///    empty fields must be removed. Legacy fields are selected as spans
+		///    before their final strings are created.
 		/// </remarks>
 		protected void ParseRawData ()
 		{
@@ -849,19 +852,27 @@ namespace TagLib.Id3v2
 			// read the string data type (the first byte of the
 			// field data)
 			encoding = (StringType)data[0];
-			List<string> field_list = new List<string> ();
-
-			ByteVector delim = ByteVector.TextDelimiter (encoding);
-
 			if (raw_version > 3 || FrameId == FrameType.TXXX) {
-				field_list.AddRange (data.ToStrings (encoding, 1));
-			} else if (data.Count > 1 && !data.Mid (1, delim.Count).Equals (delim)) {
-				string value = data.ToString (encoding, 1, data.Count - 1);
+				string[] fields = data.ToStrings (encoding, 1);
+				int count = fields.Length;
+				while (count != 0 && string.IsNullOrEmpty (fields[count - 1]))
+					--count;
+				if (count != fields.Length)
+					Array.Resize (ref fields, count);
+				text_fields = fields;
+				return;
+			}
+
+			List<string> field_list = new List<string> ();
+			ByteVector delim = ByteVector.TextDelimiter (encoding);
+			if (data.Count > 1 && (data.Count - 1 < delim.Count || !data.ContainsAt (delim, 1))) {
+				string decoded = data.ToString (encoding, 1, data.Count - 1);
+				ReadOnlySpan<char> value = decoded.AsSpan ();
 
 				// Truncate values containing NULL bytes
 				int null_index = value.IndexOf ('\x00');
 				if (null_index >= 0) {
-					value = value.Substring (0, null_index);
+					value = value[..null_index];
 				}
 
 				if (FrameId == FrameType.TCOM ||
@@ -878,28 +889,31 @@ namespace TagLib.Id3v2
 					FrameId == FrameType.TPE4 ||
 					FrameId == FrameType.MVNM ||
 					FrameId == FrameType.MVIN) {
-					field_list.AddRange (value.Split ('/'));
+					foreach (Range range in value.Split ('/'))
+						field_list.Add (value[range].Length == decoded.Length ? decoded : value[range].ToString ());
 				} else if (FrameId == FrameType.TCON) {
 					while (value.Length > 1 && value[0] == '(') {
 						int closing = value.IndexOf (')');
 						if (closing < 0)
 							break;
 
-						string number = value.Substring (1, closing - 1);
+						string number = value.Slice (1, closing - 1).ToString ();
 
 						field_list.Add (number);
 
-						value = value.Substring (closing + 1).TrimStart ('/', ' ');
+						value = value[(closing + 1)..].TrimStart ("/ ");
 
 						string text = Genres.IndexToAudio (number);
-						if (text != null && value.StartsWith (text))
-							value = value.Substring (text.Length).TrimStart ('/', ' ');
+						if (text != null && value.StartsWith (text, StringComparison.CurrentCulture))
+							value = value[text.Length..].TrimStart ("/ ");
 					}
 
-					if (value.Length > 0)
-						field_list.AddRange (value.Split (new[] { '/', ';' }));
+					if (value.Length > 0) {
+						foreach (Range range in value.SplitAny ("/;"))
+							field_list.Add (value[range].Length == decoded.Length ? decoded : value[range].ToString ());
+					}
 				} else {
-					field_list.Add (value);
+					field_list.Add (value.Length == decoded.Length ? decoded : value.ToString ());
 				}
 			}
 

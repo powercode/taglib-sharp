@@ -863,6 +863,144 @@ public class ByteVectorTest
 		Assert.AreEqual (2, split.Length);
 	}
 
+	[TestMethod]
+	[DataRow (false)]
+	[DataRow (true)]
+	public void DecodingMatchesPreviousBomAndMalformedInputBehavior (bool useBrokenLatin1)
+	{
+		bool previous = ByteVector.UseBrokenLatin1Behavior;
+		try {
+			ByteVector.UseBrokenLatin1Behavior = useBrokenLatin1;
+			var random = new Random (42);
+			var sources = new List<byte[]> {
+				Array.Empty<byte> (),
+				new byte[] { 0xff, 0xfe, 65, 0, 0xff },
+				new byte[] { 0xfe, 0xff, 0, 65, 0xfe },
+				new byte[] { 0xff, 0xfe, 0xfe, 0xff, 0xff, 0xfe, 65, 0 },
+				new byte[] { 0xef, 0xbb, 0xbf, 0xef, 0xbf, 0xbe, 0xef, 0xbb, 0xbf, 65 },
+				new byte[] { 0xff, 0xfe, 0, 0xd8, 65, 0, 0, 0xdc },
+				new byte[] { 0xfe, 0xff, 0xd8, 0, 0, 65, 0xdc, 0 },
+				new byte[] { 65, 0, 0, 1, 0, 0, 66, 0, 0, 0, 0 },
+			};
+			for (int i = 0; i < 64; ++i) {
+				var bytes = new byte[random.Next (1, 33)];
+				random.NextBytes (bytes);
+				sources.Add (bytes);
+			}
+
+			foreach (StringType type in new[] { StringType.Latin1, StringType.UTF8, StringType.UTF16, StringType.UTF16BE, StringType.UTF16LE, (StringType)255 }) {
+				Encoding lastEncoding = Encoding.Unicode;
+				_ = new ByteVector (0xff, 0xfe).ToString (StringType.UTF16);
+				foreach (byte[] bytes in sources) {
+					var vector = new ByteVector (bytes);
+					for (int offset = 0; offset <= bytes.Length; ++offset) {
+						for (int count = 0; count <= bytes.Length - offset; ++count) {
+							string expected = DecodeReference (bytes, type, offset, count, ref lastEncoding);
+							Assert.AreEqual (expected, vector.ToString (type, offset, count),
+								$"Encoding={type}, offset={offset}, count={count}, bytes={Convert.ToHexString (bytes)}");
+						}
+						foreach (int limit in new[] { 0, 1, 2, 4, int.MaxValue }) {
+							Encoding initialEncoding = lastEncoding;
+							var expected = new List<string> ();
+							int position = offset;
+							int alignment = ByteVector.TextDelimiter (type).Count;
+							while (expected.Count < limit && position < bytes.Length) {
+								int start = position;
+								position = expected.Count + 1 == limit ? bytes.Length
+									: vector.Find (ByteVector.TextDelimiter (type), start, alignment);
+								if (position < 0)
+									position = bytes.Length;
+								string value = position == start ? "" : DecodeReference (bytes, type, start, position - start, ref lastEncoding);
+								if (value.Length != 0 && (value[0] == '\ufeff' || value[0] == '\ufffe'))
+									value = value[1..];
+								expected.Add (value);
+								position += alignment;
+							}
+							_ = (initialEncoding == Encoding.Unicode ? new ByteVector (0xff, 0xfe)
+								: new ByteVector (0xfe, 0xff)).ToString (StringType.UTF16);
+							Assert.AreSequenceEqual (expected.ToArray (), vector.ToStrings (type, offset, limit),
+								$"Encoding={type}, offset={offset}, limit={limit}, bytes={Convert.ToHexString (bytes)}");
+						}
+					}
+				}
+			}
+		} finally {
+			ByteVector.UseBrokenLatin1Behavior = previous;
+		}
+	}
+
+	static string DecodeReference (byte[] bytes, StringType type, int offset, int count, ref Encoding lastEncoding)
+	{
+		if (type == StringType.UTF16 && bytes.Length - offset >= 2) {
+			if (bytes[offset] == 0xff && bytes[offset + 1] == 0xfe)
+				lastEncoding = Encoding.Unicode;
+			else if (bytes[offset] == 0xfe && bytes[offset + 1] == 0xff)
+				lastEncoding = Encoding.BigEndianUnicode;
+		}
+		Encoding encoding = type switch {
+			StringType.UTF16 => lastEncoding,
+			StringType.UTF16BE => Encoding.BigEndianUnicode,
+			StringType.UTF16LE => Encoding.Unicode,
+			StringType.UTF8 => Encoding.UTF8,
+			_ => ByteVector.UseBrokenLatin1Behavior ? Encoding.Default : Encoding.Latin1,
+		};
+		string value = encoding.GetString (bytes.AsSpan (offset, count));
+		return value.Length != 0 && (value[0] == '\ufeff' || value[0] == '\ufffe') ? value[1..] : value;
+	}
+
+	[TestMethod]
+	[DataRow (StringType.UTF8)]
+	[DataRow (StringType.UTF16)]
+	[DataRow (StringType.UTF16BE)]
+	[DataRow (StringType.UTF16LE)]
+	public void ToStringWithBomAllocatesOnlyFinalString (StringType type)
+	{
+		string text = new string ('A', 4096);
+		var vector = ByteVector.FromString (type == StringType.UTF16 ? text : "\ufeff" + text, type);
+		Encoding encoding = type == StringType.UTF8 ? Encoding.UTF8
+			: type == StringType.UTF16BE ? Encoding.BigEndianUnicode : Encoding.Unicode;
+		byte[] bytes = encoding.GetBytes (text);
+		for (int i = 0; i < 100; ++i) {
+			encoding.GetString (bytes.AsSpan ());
+			vector.ToString (type);
+		}
+
+		long before = GC.GetAllocatedBytesForCurrentThread ();
+		string baseline = encoding.GetString (bytes.AsSpan ());
+		long baselineAllocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		before = GC.GetAllocatedBytesForCurrentThread ();
+		string result = vector.ToString (type);
+		long allocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		Assert.AreEqual (baselineAllocation, allocation);
+		Assert.AreEqual (text, result);
+		GC.KeepAlive (baseline);
+	}
+
+	[TestMethod]
+	public void ToStringsWithRepeatedBomsAllocatesOnlyFinalStringsAndArray ()
+	{
+		var vector = ByteVector.FromString ("\ufeffA\0\ufeffB", StringType.UTF16);
+		var withoutBoms = ByteVector.FromString ("A\0B", StringType.UTF16LE);
+		for (int i = 0; i < 100; ++i) {
+			vector.ToStrings (StringType.UTF16, 0);
+			withoutBoms.ToStrings (StringType.UTF16LE, 0);
+		}
+
+		long before = GC.GetAllocatedBytesForCurrentThread ();
+		var baseline = withoutBoms.ToStrings (StringType.UTF16LE, 0);
+		long baselineAllocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		before = GC.GetAllocatedBytesForCurrentThread ();
+		var result = vector.ToStrings (StringType.UTF16, 0);
+		long allocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		Assert.AreEqual (baselineAllocation, allocation);
+		Assert.AreSequenceEqual (new[] { "A", "B" }, result);
+		GC.KeepAlive (baseline);
+	}
+
 	static string MD5Hash (byte[] bytes)
 	{
 		var md5 = MD5.Create ();

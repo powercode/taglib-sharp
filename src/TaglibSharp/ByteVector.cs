@@ -1492,6 +1492,10 @@ namespace TagLib
 		///    A <see cref="string"/> object containing the converted
 		///    text.
 		/// </returns>
+		/// <remarks>
+		///    Decodes directly from the byte storage, excluding a leading byte
+		///    order mark without allocating an intermediate vector or string.
+		/// </remarks>
 		/// <exception cref="ArgumentOutOfRangeException">
 		///    <paramref name="offset" /> is less than zero or greater
 		///    than the total number of bytes, or <paramref name="count"
@@ -1500,23 +1504,35 @@ namespace TagLib
 		/// </exception>
 		public string ToString (StringType type, int offset, int count)
 		{
+			return DecodeString (type, offset, count, 1);
+		}
+
+		string DecodeString (StringType type, int offset, int count, int maxBoms)
+		{
 			ArgumentOutOfRangeException.ThrowIfNegative (offset);
 			ArgumentOutOfRangeException.ThrowIfGreaterThan (offset, Count);
 			ArgumentOutOfRangeException.ThrowIfNegative (count);
 			ArgumentOutOfRangeException.ThrowIfGreaterThan (count, Count - offset);
+			ReadOnlySpan<byte> remaining = CollectionsMarshal.AsSpan (data).Slice (offset);
+			// Endianness historically uses the available bytes even when count is less than two.
+			Encoding encoding = StringTypeToEncoding (type, remaining);
+			ReadOnlySpan<byte> bytes = remaining[..count];
+			for (int i = 0; i < maxBoms; ++i) {
+				int bomLength = encoding.CodePage switch {
+					1200 or 1201 when bytes.Length >= 2 &&
+						((bytes[0] == 0xff && bytes[1] == 0xfe) ||
+						(bytes[0] == 0xfe && bytes[1] == 0xff)) => 2,
+					65001 when bytes.Length >= 3 && bytes[0] == 0xef &&
+						((bytes[1] == 0xbb && bytes[2] == 0xbf) ||
+						(bytes[1] == 0xbf && bytes[2] == 0xbe)) => 3,
+					_ => 0,
+				};
+				if (bomLength == 0)
+					break;
+				bytes = bytes[bomLength..];
+			}
 
-
-			var bom = type == StringType.UTF16 &&
-			          data.Count - offset > 1 ? Mid (offset, 2) : null;
-
-			var listSpan = CollectionsMarshal.AsSpan (data);
-			string s = StringTypeToEncoding (type, bom)
-				.GetString (listSpan.Slice (offset, count));
-			// UTF16 BOM
-			if (s.Length != 0 && (s[0] == 0xfffe || s[0] == 0xfeff))
-				return s[1..];
-
-			return s;
+			return encoding.GetString (bytes);
 		}
 
 		/// <summary>
@@ -1646,14 +1662,9 @@ namespace TagLib
 				int length = position - start;
 
 				string s = string.Empty;
-				if (length != 0) {
-					s = ToString (type, start, length);
-					if (s.Length != 0 && (s[0] == 0xfffe ||
-						s[0] == 0xfeff)) { // UTF16 BOM
-						s = s.Substring (1);
-					}
-
-				}
+				if (length != 0)
+					// ToStrings historically removes up to two leading BOM characters.
+					s = DecodeString (type, start, length, 2);
 
 				if (chunk < buffer.Length) {
 					buffer[chunk] = s;
@@ -2237,7 +2248,7 @@ namespace TagLib
 				: ReadOnlySpan<byte>.Empty;
 			Encoding encoding = type == StringType.UTF16
 				? Encoding.Unicode
-				: StringTypeToEncoding (type, null);
+				: StringTypeToEncoding (type, default);
 			int size = checked (bom.Length + encoding.GetByteCount (characters));
 
 			var vector = new ByteVector (size, bom);
@@ -2245,7 +2256,7 @@ namespace TagLib
 
 			if (!text.IsEmpty) {
 				// Preserve the BOM's effect on subsequent BOM-less UTF-16 decoding.
-				encoding = StringTypeToEncoding (type, vector);
+				encoding = StringTypeToEncoding (type, destination);
 				encoding.GetBytes (characters, destination.Slice (bom.Length));
 			}
 
@@ -2594,7 +2605,7 @@ namespace TagLib
 		///    use.
 		/// </param>
 		/// <param name="bom">
-		///    A <see cref="ByteVector"/> object containing the first
+		///    A byte span containing the first
 		///    two bytes of the data to convert if <paramref
 		///    name="type" /> equals <see cref="StringType.UTF16" />.
 		/// </param>
@@ -2607,7 +2618,7 @@ namespace TagLib
 		///    encoding is big or little endian. If it does not contain
 		///    BOM data, the previously used endian format is used.
 		/// </remarks>
-		static Encoding StringTypeToEncoding (StringType type, ByteVector bom)
+		static Encoding StringTypeToEncoding (StringType type, ReadOnlySpan<byte> bom)
 		{
 			return type switch {
 				StringType.UTF16 => GetLastUtf16Encoding (bom),
@@ -2617,7 +2628,7 @@ namespace TagLib
 				_ => (Encoding)(use_broken_latin1 ? Encoding.Default : Encoding.Latin1),
 			};
 
-			static Encoding GetLastUtf16Encoding (ByteVector bom)
+			static Encoding GetLastUtf16Encoding (ReadOnlySpan<byte> bom)
 			{
 				// If we have a BOM, return the appropriate
 				// encoding. Otherwise, assume we're reading
@@ -2626,9 +2637,8 @@ namespace TagLib
 				// last_utf16_encoding.
 
 				return bom switch {
-					null => last_utf16_encoding,
-					{ Count: >= 2 } b when b[0] == 0xFF && b[1] == 0xFE => last_utf16_encoding = Encoding.Unicode,
-					{ Count: >= 2 } b when b[1] == 0xFF && b[0] == 0xFE => last_utf16_encoding = Encoding.BigEndianUnicode,
+					{ Length: >= 2 } b when b[0] == 0xFF && b[1] == 0xFE => last_utf16_encoding = Encoding.Unicode,
+					{ Length: >= 2 } b when b[1] == 0xFF && b[0] == 0xFE => last_utf16_encoding = Encoding.BigEndianUnicode,
 					_ => last_utf16_encoding,
 				};
 			}
