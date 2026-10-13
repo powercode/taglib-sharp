@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.Reflection;
+using System.Text;
 
 namespace TaglibSharp.Tests.Collections;
 
@@ -12,6 +14,146 @@ public class ByteVectorTest
 	public void Length ()
 	{
 		Assert.AreEqual (TestInput.Length, TestVector.Count);
+	}
+
+	[TestMethod]
+	[DataRow (StringType.Latin1)]
+	[DataRow (StringType.UTF8)]
+	[DataRow (StringType.UTF16)]
+	[DataRow (StringType.UTF16BE)]
+	[DataRow (StringType.UTF16LE)]
+	public void FromStringMatchesEncoding (StringType type)
+	{
+		bool previous = ByteVector.UseBrokenLatin1Behavior;
+		try {
+			ByteVector.UseBrokenLatin1Behavior = false;
+			Encoding encoding = type switch {
+				StringType.Latin1 => Encoding.Latin1,
+				StringType.UTF8 => Encoding.UTF8,
+				StringType.UTF16BE => Encoding.BigEndianUnicode,
+				_ => Encoding.Unicode
+			};
+
+			foreach (string text in new[] { null, "", "A", "A\u00e9\u20ac\U0001f600Z", "\ud800X\udc00", new string ('\u20ac', 4096) }) {
+				foreach (int length in new[] { 0, 1, 2, 4, int.MaxValue }) {
+					string truncated = text == null ? "" : text.Substring (0, Math.Min (text.Length, length));
+					byte[] payload = encoding.GetBytes (truncated);
+					byte[] expected = type == StringType.UTF16
+						? new byte[] { 0xff, 0xfe }.Concat (payload).ToArray ()
+						: payload;
+
+					var vector = ByteVector.FromString (text, type, length);
+					Assert.AreSequenceEqual (expected, vector.Data, $"Type={type}, length={length}");
+
+					var field = typeof (ByteVector).GetField ("data", BindingFlags.Instance | BindingFlags.NonPublic);
+					var storage = (List<byte>)field.GetValue (vector);
+					Assert.AreEqual (expected.Length, storage.Capacity, $"Type={type}, length={length}");
+				}
+			}
+		} finally {
+			ByteVector.UseBrokenLatin1Behavior = previous;
+		}
+	}
+
+	[TestMethod]
+	[DataRow (false)]
+	[DataRow (true)]
+	public void FromStringEncodingTestRestoresLatin1Behavior (bool useBrokenLatin1)
+	{
+		bool previous = ByteVector.UseBrokenLatin1Behavior;
+		try {
+			ByteVector.UseBrokenLatin1Behavior = useBrokenLatin1;
+			FromStringMatchesEncoding (StringType.Latin1);
+			Assert.AreEqual (useBrokenLatin1, ByteVector.UseBrokenLatin1Behavior);
+		} finally {
+			ByteVector.UseBrokenLatin1Behavior = previous;
+		}
+	}
+
+	[TestMethod]
+	public void FromStringPreservesLengthBehavior ()
+	{
+		Assert.AreEqual ("length", Assert.ThrowsExactly<ArgumentOutOfRangeException> (
+			() => ByteVector.FromString ("A", StringType.UTF8, -1)).ParamName);
+		Assert.AreEqual (0, ByteVector.FromString (null, StringType.UTF8, -1).Count);
+		Assert.AreEqual (0, ByteVector.FromString ("", StringType.UTF8, -1).Count);
+		CollectionAssert.AreEqual (new byte[] { 0xff, 0xfe },
+			ByteVector.FromString (null, StringType.UTF16, -1).Data);
+		CollectionAssert.AreEqual (new byte[] { 0xff, 0xfe },
+			ByteVector.FromString ("", StringType.UTF16, -1).Data);
+		CollectionAssert.AreEqual (Encoding.UTF8.GetBytes ("AB"), ByteVector.FromString ("ABC", 2).Data);
+	}
+
+	[TestMethod]
+	public void FromStringPreservesUtf16DecodingState ()
+	{
+		var bigEndian = new ByteVector (0xfe, 0xff, 0, 65);
+		var withoutBom = new ByteVector (new byte[] { 0, 65 });
+		Assert.AreEqual ("A", bigEndian.ToString (StringType.UTF16));
+		ByteVector.FromString (null, StringType.UTF16);
+		ByteVector.FromString ("", StringType.UTF16);
+		Assert.AreEqual ("A", withoutBom.ToString (StringType.UTF16));
+
+		ByteVector.FromString ("A", StringType.UTF16, 0);
+		Assert.AreEqual ("A", new ByteVector (new byte[] { 65, 0 }).ToString (StringType.UTF16));
+	}
+
+	[TestMethod]
+	public void SpanConstructorCopiesData ()
+	{
+		Span<byte> source = stackalloc byte[] { 1, 2, 3 };
+		var vector = new ByteVector (source);
+		source[0] = 4;
+
+		CollectionAssert.AreEqual (new byte[] { 1, 2, 3 }, vector.Data);
+		var field = typeof (ByteVector).GetField ("data", BindingFlags.Instance | BindingFlags.NonPublic);
+		var storage = (List<byte>)field.GetValue (vector);
+		Assert.AreEqual (source.Length, storage.Capacity);
+		Assert.AreEqual (0, new ByteVector (ReadOnlySpan<byte>.Empty).Count);
+	}
+
+	[TestMethod]
+	[DataRow (StringType.Latin1)]
+	[DataRow (StringType.UTF8)]
+	[DataRow (StringType.UTF16)]
+	[DataRow (StringType.UTF16BE)]
+	[DataRow (StringType.UTF16LE)]
+	public void FromStringAcceptsSpans (StringType type)
+	{
+		ReadOnlySpan<char> text = "XA\u00e9\u20ac\U0001f600Z".AsSpan (1, 5);
+		CollectionAssert.AreEqual (ByteVector.FromString (text.ToString (), type).Data,
+			ByteVector.FromString (text, type).Data);
+		CollectionAssert.AreEqual (ByteVector.FromString (text.ToString (), type, 4).Data,
+			ByteVector.FromString (text, type, 4).Data);
+		CollectionAssert.AreEqual (ByteVector.FromString ("", type).Data,
+			ByteVector.FromString (ReadOnlySpan<char>.Empty, type).Data);
+	}
+
+	[TestMethod]
+	[DataRow (StringType.UTF8, 100)]
+	[DataRow (StringType.UTF8, int.MaxValue)]
+	[DataRow (StringType.UTF16, 100)]
+	[DataRow (StringType.UTF16, int.MaxValue)]
+	public void FromStringAllocatesOnlyFinalStorage (StringType type, int length)
+	{
+		string text = new string ('\u20ac', 4096);
+		byte[] expected = ByteVector.FromString (text, type, length).Data;
+		for (int i = 0; i < 100; ++i) {
+			ByteVector.FromString (text, type, length);
+			_ = new ByteVector (expected);
+		}
+
+		long before = GC.GetAllocatedBytesForCurrentThread ();
+		var baseline = new ByteVector (expected);
+		long baselineAllocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		before = GC.GetAllocatedBytesForCurrentThread ();
+		var vector = ByteVector.FromString (text, type, length);
+		long allocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		Assert.AreEqual (baselineAllocation, allocation);
+		CollectionAssert.AreEqual (expected, vector.Data);
+		GC.KeepAlive (baseline);
 	}
 
 	[TestMethod]

@@ -158,8 +158,6 @@ namespace TagLib
 		/// </summary>
 		static bool use_broken_latin1;
 
-		static Encoding latin1_encoding = Encoding.GetEncoding ("latin1");
-
 		/// <summary>
 		///    Contains a one byte text delimiter.
 		/// </summary>
@@ -193,7 +191,7 @@ namespace TagLib
 		/// <summary>
 		///    Contains the internal byte list.
 		/// </summary>
-		readonly List<byte> data = new List<byte> ();
+		readonly List<byte> data;
 
 		#endregion
 
@@ -207,6 +205,14 @@ namespace TagLib
 		/// </summary>
 		public ByteVector ()
 		{
+			data = new List<byte> ();
+		}
+
+		ByteVector (int size, ReadOnlySpan<byte> initialData)
+		{
+			data = new List<byte> (size);
+			CollectionsMarshal.SetCount (data, size);
+			initialData.CopyTo (CollectionsMarshal.AsSpan (data));
 		}
 
 		/// <summary>
@@ -219,6 +225,7 @@ namespace TagLib
 		///    to be stored in the new instance.
 		/// </param>
 		public ByteVector (ByteVector vector)
+			: this ()
 		{
 			if (vector != null)
 				data.AddRange (vector);
@@ -234,9 +241,24 @@ namespace TagLib
 		///    in the new instance.
 		/// </param>
 		public ByteVector (params byte[] data)
+			: this ()
 		{
 			if (data != null)
 				this.data.AddRange (data);
+		}
+
+		/// <summary>
+		///    Constructs a new instance by copying the bytes from a span.
+		/// </summary>
+		/// <param name="data">
+		///    The bytes to copy into the new instance.
+		/// </param>
+		/// <remarks>
+		///    Creates the backing storage at its final size before copying.
+		/// </remarks>
+		public ByteVector (ReadOnlySpan<byte> data)
+			: this (data.Length, data)
+		{
 		}
 
 
@@ -261,6 +283,7 @@ namespace TagLib
 		///    than the length of the data.
 		/// </exception>
 		public ByteVector (byte[] data, int length)
+			: this ()
 		{
 			ArgumentNullException.ThrowIfNull (data);
 			ArgumentOutOfRangeException.ThrowIfGreaterThan (length, data.Length);
@@ -314,6 +337,7 @@ namespace TagLib
 		///    <paramref name="size" /> is less than zero.
 		/// </exception>
 		public ByteVector (int size, byte value)
+			: this ()
 		{
 			ArgumentOutOfRangeException.ThrowIfNegative (size);
 
@@ -2147,23 +2171,83 @@ namespace TagLib
 		///    A <see cref="ByteVector"/> object containing the encoded
 		///    representation of <paramref name="text" />.
 		/// </returns>
+		/// <remarks>
+		///    Encodes directly into an exactly sized buffer without
+		///    allocating a substring or an intermediate byte array.
+		/// </remarks>
+		/// <exception cref="ArgumentOutOfRangeException">
+		///    The text is nonempty and <paramref name="length" /> is negative.
+		/// </exception>
 		public static ByteVector FromString (string text, StringType type, int length)
 		{
-			var data = new ByteVector ();
+			return FromString (text.AsSpan (), type, length);
+		}
 
-			if (type == StringType.UTF16)
-				data.Add (new byte[] { 0xff, 0xfe });
+		/// <summary>
+		///    Converts a span of characters into an encoded data representation.
+		/// </summary>
+		/// <param name="text">
+		///    The text to convert.
+		/// </param>
+		/// <param name="type">
+		///    The encoding to use.
+		/// </param>
+		/// <param name="length">
+		///    The maximum number of UTF-16 code units to encode.
+		/// </param>
+		/// <returns>
+		///    A vector containing the encoded text.
+		/// </returns>
+		/// <remarks>
+		///    Encodes directly into an exactly sized buffer without
+		///    allocating an intermediate byte array.
+		/// </remarks>
+		/// <exception cref="ArgumentOutOfRangeException">
+		///    The text is nonempty and <paramref name="length" /> is negative.
+		/// </exception>
+		public static ByteVector FromString (ReadOnlySpan<char> text, StringType type, int length)
+		{
+			ReadOnlySpan<char> characters = text;
+			if (!characters.IsEmpty && characters.Length > length) {
+				ArgumentOutOfRangeException.ThrowIfNegative (length);
+				characters = characters.Slice (0, length);
+			}
 
-			if (text == null || text.Length == 0)
-				return data;
+			ReadOnlySpan<byte> bom = type == StringType.UTF16
+				? stackalloc byte[] { 0xff, 0xfe }
+				: ReadOnlySpan<byte>.Empty;
+			Encoding encoding = type == StringType.UTF16
+				? Encoding.Unicode
+				: StringTypeToEncoding (type, null);
+			int size = checked (bom.Length + encoding.GetByteCount (characters));
 
-			if (text.Length > length)
-				text = text.Substring (0, length);
+			var vector = new ByteVector (size, bom);
+			Span<byte> destination = CollectionsMarshal.AsSpan (vector.data);
 
-			data.Add (StringTypeToEncoding (type, data)
-				.GetBytes (text));
+			if (!text.IsEmpty) {
+				// Preserve the BOM's effect on subsequent BOM-less UTF-16 decoding.
+				encoding = StringTypeToEncoding (type, vector);
+				encoding.GetBytes (characters, destination.Slice (bom.Length));
+			}
 
-			return data;
+			return vector;
+		}
+
+		/// <summary>
+		///    Converts a span of characters into an encoded data representation.
+		/// </summary>
+		/// <param name="text">
+		///    The text to convert.
+		/// </param>
+		/// <param name="type">
+		///    The encoding to use.
+		/// </param>
+		/// <returns>
+		///    A vector containing the encoded text.
+		/// </returns>
+		public static ByteVector FromString (ReadOnlySpan<char> text, StringType type)
+		{
+			return FromString (text, type, int.MaxValue);
 		}
 
 		/// <summary>
@@ -2466,44 +2550,28 @@ namespace TagLib
 		/// </remarks>
 		static Encoding StringTypeToEncoding (StringType type, ByteVector bom)
 		{
-			switch (type) {
-			case StringType.UTF16:
+			return type switch {
+				StringType.UTF16 => GetLastUtf16Encoding (bom),
+				StringType.UTF16BE => (Encoding)Encoding.BigEndianUnicode,
+				StringType.UTF8 => (Encoding)Encoding.UTF8,
+				StringType.UTF16LE => (Encoding)Encoding.Unicode,
+				_ => (Encoding)(use_broken_latin1 ? Encoding.Default : Encoding.Latin1),
+			};
+
+			static Encoding GetLastUtf16Encoding (ByteVector bom)
+			{
 				// If we have a BOM, return the appropriate
 				// encoding. Otherwise, assume we're reading
 				// from a string that was already identified. In
 				// that case, the encoding will be stored as
 				// last_utf16_encoding.
 
-				if (bom == null)
-					return last_utf16_encoding;
-
-				if (bom[0] == 0xFF && bom[1] == 0xFE)
-					return last_utf16_encoding =
-						Encoding.Unicode;
-
-				if (bom[1] == 0xFF && bom[0] == 0xFE)
-					return last_utf16_encoding =
-						Encoding.BigEndianUnicode;
-
-				return last_utf16_encoding;
-
-			case StringType.UTF16BE:
-				return Encoding.BigEndianUnicode;
-
-			case StringType.UTF8:
-				return Encoding.UTF8;
-
-			case StringType.UTF16LE:
-				return Encoding.Unicode;
-			}
-
-			if (use_broken_latin1)
-				return Encoding.Default;
-
-			try {
-				return latin1_encoding;
-			} catch (ArgumentException) {
-				return Encoding.UTF8;
+				return bom switch {
+					null => last_utf16_encoding,
+					{ Count: >= 2 } b when b[0] == 0xFF && b[1] == 0xFE => last_utf16_encoding = Encoding.Unicode,
+					{ Count: >= 2 } b when b[1] == 0xFF && b[0] == 0xFE => last_utf16_encoding = Encoding.BigEndianUnicode,
+					_ => last_utf16_encoding,
+				};
 			}
 		}
 
@@ -2529,7 +2597,7 @@ namespace TagLib
 		/// </returns>
 		public override bool Equals (object other)
 		{
-			if (!(other is ByteVector))
+			if (other is not ByteVector)
 				return false;
 
 			return Equals ((ByteVector)other);
