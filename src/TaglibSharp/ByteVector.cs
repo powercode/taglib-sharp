@@ -2429,6 +2429,14 @@ namespace TagLib
 		/// <exception cref="ArgumentNullException">
 		///    <paramref name="stream" /> is <see langword="null" />.
 		/// </exception>
+		/// <remarks>
+		///    Reads from the current position until the end of the stream
+		///    without closing it. Non-seekable streams are supported.
+		/// </remarks>
+		/// <exception cref="IOException">
+		///    The remaining stream contents exceed the maximum backing
+		///    array length, or the stream reports an I/O error.
+		/// </exception>
 		public static ByteVector FromStream (Stream stream)
 		{
 			return FromStream (stream, out _, false);
@@ -2444,7 +2452,9 @@ namespace TagLib
 		/// </param>
 		/// <param name="firstChunk">
 		///    A <see cref="T:byte[]"/> reference to be filled with the
-		///    first data chunk from the read stream.
+		///    first read from the stream, limited to 4096 bytes and
+		///    zero-padded to 4096 bytes, or <see langword="null" /> when
+		///    <paramref name="copyFirstChunk" /> is false.
 		/// </param>
 		/// <param name="copyFirstChunk">
 		///    A <see cref="bool"/> value specifying whether or not to
@@ -2463,39 +2473,53 @@ namespace TagLib
 			ArgumentNullException.ThrowIfNull (stream);
 
 			var vector = new ByteVector ();
-			byte[] bytes = new byte[4096];
-			int read_size = bytes.Length;
-			int bytes_read = 0;
-			bool set_first_chunk = false;
+			const int chunkSize = 4096;
+			if (stream.CanSeek) {
+				long remaining = Math.Max (0, stream.Length - stream.Position);
+				if (remaining > Array.MaxLength)
+					throw new IOException ("Stream is too large for a ByteVector.");
 
-			firstChunk = null;
-
-			while (true) {
-				Array.Clear (bytes, 0, bytes.Length);
-				int n = stream.Read (bytes, 0, read_size);
-				vector.Add (bytes);
-				bytes_read += n;
-
-				if (!set_first_chunk) {
-					if (copyFirstChunk) {
-						if (firstChunk == null ||
-							firstChunk.Length != read_size) {
-							firstChunk = new byte[read_size];
-						}
-
-						Array.Copy (bytes, 0, firstChunk, 0, n);
-					}
-					set_first_chunk = true;
-				}
-
-				if ((bytes_read == stream.Length && stream.Length > 0) ||
-					(n < read_size && stream.Length <= 0)) {
-					break;
-				}
+				vector.data.Capacity = (int)remaining;
+			} else {
+				vector.data.EnsureCapacity (chunkSize);
 			}
 
-			if (stream.Length > 0 && vector.Count != stream.Length) {
-				vector.Resize ((int)stream.Length);
+			firstChunk = copyFirstChunk ? new byte[chunkSize] : null;
+			bool firstRead = true;
+			Span<byte> probe = stackalloc byte[1];
+
+			while (true) {
+				int count = vector.Count;
+				bool full = count == vector.data.Capacity;
+				scoped Span<byte> destination;
+				if (full) {
+					// Probe EOF before growing a completely filled backing array.
+					destination = probe;
+				} else {
+					CollectionsMarshal.SetCount (vector.data, vector.data.Capacity);
+					destination = CollectionsMarshal.AsSpan (vector.data).Slice (count);
+				}
+
+				if (firstRead && copyFirstChunk)
+					destination = destination.Slice (0, Math.Min (destination.Length, chunkSize));
+
+				int read = stream.Read (destination);
+				if (firstRead && copyFirstChunk)
+					destination.Slice (0, read).CopyTo (firstChunk);
+				firstRead = false;
+
+				if (full) {
+					if (read > 0) {
+						if (count == Array.MaxLength)
+							throw new IOException ("Stream is too large for a ByteVector.");
+						vector.data.Add (probe[0]);
+					}
+				} else {
+					CollectionsMarshal.SetCount (vector.data, count + read);
+				}
+
+				if (read == 0)
+					break;
 			}
 
 			return vector;

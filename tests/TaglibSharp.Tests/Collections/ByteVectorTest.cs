@@ -17,6 +17,211 @@ public class ByteVectorTest
 	}
 
 	[TestMethod]
+	[DataRow (0)]
+	[DataRow (1)]
+	[DataRow (4095)]
+	[DataRow (4096)]
+	[DataRow (4097)]
+	[DataRow (16384)]
+	public void FromStreamReadsRemainingBytes (int length)
+	{
+		byte[] source = new byte[length + 13];
+		new Random (42).NextBytes (source);
+		using var stream = new MemoryStream (source);
+		stream.Position = 13;
+
+		var vector = ByteVector.FromStream (stream);
+
+		CollectionAssert.AreEqual (source.AsSpan (13).ToArray (), vector.Data);
+		Assert.AreEqual (stream.Length, stream.Position);
+		Assert.IsTrue (stream.CanRead);
+		var field = typeof (ByteVector).GetField ("data", BindingFlags.Instance | BindingFlags.NonPublic);
+		var storage = (List<byte>)field.GetValue (vector);
+		Assert.AreEqual (length, storage.Capacity);
+	}
+
+	[TestMethod]
+	[DataRow (true, 0, 7)]
+	[DataRow (true, 8193, 7)]
+	[DataRow (false, 0, 7)]
+	[DataRow (false, 8193, 7)]
+	[DataRow (false, 4096, 4096)]
+	[DataRow (false, 8192, 4096)]
+	public void FromStreamHandlesShortReadsAndNonSeekableStreams (bool canSeek, int length, int maxRead)
+	{
+		byte[] source = new byte[length];
+		new Random (42).NextBytes (source);
+		using var stream = new TestReadStream (source, canSeek, maxRead);
+
+		CollectionAssert.AreEqual (source, ByteVector.FromStream (stream).Data);
+		Assert.AreEqual (1, stream.EndOfStreamReads);
+		Assert.IsTrue (stream.CanRead);
+	}
+
+	[TestMethod]
+	[DataRow (0L)]
+	[DataRow (13L)]
+	[DataRow (10000L)]
+	public void FromStreamUsesLengthOnlyAsCapacityHint (long reportedLength)
+	{
+		byte[] source = new byte[8193];
+		new Random (42).NextBytes (source);
+		using var stream = new TestReadStream (source, reportedLength: reportedLength);
+
+		CollectionAssert.AreEqual (source, ByteVector.FromStream (stream).Data);
+		Assert.AreEqual (1, stream.EndOfStreamReads);
+	}
+
+	[TestMethod]
+	public void FromStreamAcceptsPositionBeyondEnd ()
+	{
+		using var stream = new MemoryStream (new byte[3]);
+		stream.Position = 10;
+		Assert.AreEqual (0, ByteVector.FromStream (stream).Count);
+		Assert.AreEqual (10L, stream.Position);
+	}
+
+	[TestMethod]
+	[DataRow (true, true, 0, 7)]
+	[DataRow (true, true, 3, 7)]
+	[DataRow (true, true, 8193, 7)]
+	[DataRow (true, true, 8193, 4096)]
+	[DataRow (true, true, 8193, int.MaxValue)]
+	[DataRow (true, false, 8193, 7)]
+	[DataRow (false, true, 0, 7)]
+	[DataRow (false, true, 8193, 7)]
+	[DataRow (false, false, 8193, 7)]
+	public void FromStreamPreservesFirstChunk (bool canSeek, bool copyFirstChunk, int length, int maxRead)
+	{
+		byte[] source = new byte[length];
+		new Random (42).NextBytes (source);
+		using var stream = new TestReadStream (source, canSeek, maxRead);
+		var method = typeof (ByteVector).GetMethod ("FromStream", BindingFlags.Static | BindingFlags.NonPublic);
+		object[] arguments = { stream, null, copyFirstChunk };
+
+		var vector = (ByteVector)method.Invoke (null, arguments);
+
+		CollectionAssert.AreEqual (source, vector.Data);
+		if (copyFirstChunk) {
+			byte[] expected = new byte[4096];
+			source.AsSpan (0, Math.Min (4096, Math.Min (length, maxRead))).CopyTo (expected);
+			CollectionAssert.AreEqual (expected, (byte[])arguments[1]);
+		} else {
+			Assert.IsNull (arguments[1]);
+		}
+	}
+
+	[TestMethod]
+	public void FromStreamRejectsOversizedStreams ()
+	{
+		using var stream = new TestReadStream (Array.Empty<byte> (), reportedLength: (long)Array.MaxLength + 1);
+		Assert.ThrowsExactly<IOException> (() => ByteVector.FromStream (stream));
+		Assert.AreEqual (0, stream.ReadCalls);
+	}
+
+	[TestMethod]
+	public void FromStreamPropagatesReadErrors ()
+	{
+		using var stream = new TestReadStream (new byte[20], maxRead: 7) { FailAfter = 7 };
+		Assert.ThrowsExactly<IOException> (() => ByteVector.FromStream (stream));
+		Assert.IsTrue (stream.CanRead);
+	}
+
+	[TestMethod]
+	public void FromStreamReadsKnownSizeInOneBulkRead ()
+	{
+		byte[] source = new byte[65536];
+		new Random (42).NextBytes (source);
+		using var stream = new TestReadStream (source);
+
+		CollectionAssert.AreEqual (source, ByteVector.FromStream (stream).Data);
+		Assert.AreEqual (2, stream.ReadCalls);
+	}
+
+	[TestMethod]
+	public void FromStreamAllocatesOnlyFinalStorage ()
+	{
+		byte[] source = new byte[65536];
+		using var stream = new MemoryStream (source);
+		for (int i = 0; i < 100; ++i) {
+			stream.Position = 0;
+			ByteVector.FromStream (stream);
+			_ = new ByteVector (source);
+		}
+
+		long before = GC.GetAllocatedBytesForCurrentThread ();
+		var baseline = new ByteVector (source);
+		long baselineAllocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		stream.Position = 0;
+		before = GC.GetAllocatedBytesForCurrentThread ();
+		var vector = ByteVector.FromStream (stream);
+		long allocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		Assert.AreEqual (baselineAllocation, allocation);
+		CollectionAssert.AreEqual (source, vector.Data);
+		GC.KeepAlive (baseline);
+	}
+
+	sealed class TestReadStream : Stream
+	{
+		readonly MemoryStream stream;
+		readonly bool canSeek;
+		readonly int maxRead;
+		readonly long? reportedLength;
+
+		public TestReadStream (byte[] source, bool canSeek = true, int maxRead = int.MaxValue, long? reportedLength = null)
+		{
+			stream = new MemoryStream (source, false);
+			this.canSeek = canSeek;
+			this.maxRead = maxRead;
+			this.reportedLength = reportedLength;
+		}
+
+		public override bool CanSeek => canSeek;
+		public override bool CanRead => stream.CanRead;
+		public override bool CanWrite => false;
+		public override long Length => canSeek ? reportedLength ?? stream.Length : throw new NotSupportedException ();
+		public override long Position {
+			get => canSeek ? stream.Position : throw new NotSupportedException ();
+			set => throw new NotSupportedException ();
+		}
+
+		public int EndOfStreamReads { get; private set; }
+		public int ReadCalls { get; private set; }
+		public long FailAfter { get; init; } = long.MaxValue;
+
+		public override int Read (Span<byte> buffer)
+		{
+			++ReadCalls;
+			if (stream.Position >= FailAfter)
+				throw new IOException ("Test read failure.");
+
+			int read = stream.Read (buffer.Slice (0, Math.Min (buffer.Length, maxRead)));
+			if (read == 0 && ++EndOfStreamReads > 1)
+				throw new IOException ("Reading continued after EOF.");
+			return read;
+		}
+
+		public override int Read (byte[] buffer, int offset, int count)
+		{
+			return Read (buffer.AsSpan (offset, count));
+		}
+
+		public override void Flush () => throw new NotSupportedException ();
+		public override long Seek (long offset, SeekOrigin origin) => throw new NotSupportedException ();
+		public override void SetLength (long value) => throw new NotSupportedException ();
+		public override void Write (byte[] buffer, int offset, int count) => throw new NotSupportedException ();
+
+		protected override void Dispose (bool disposing)
+		{
+			if (disposing)
+				stream.Dispose ();
+			base.Dispose (disposing);
+		}
+	}
+
+	[TestMethod]
 	[DataRow (StringType.Latin1)]
 	[DataRow (StringType.UTF8)]
 	[DataRow (StringType.UTF16)]
