@@ -21,4 +21,8 @@
 		<Using Include="Microsoft.VisualStudio.TestTools.UnitTesting" />
 	</ItemGroup>
 
+	<ItemGroup>
+		<AssemblyMetadata Include="TestProjectDirectory" Value="$(MSBuildProjectDirectory)" />
+	</ItemGroup>
+
 </Project>

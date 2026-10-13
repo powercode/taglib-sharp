@@ -106,6 +106,13 @@ dotnet build
 dotnet test
 ```
 
+Tests read media fixtures from `tests/TaglibSharp.Tests/samples`,
+`tests/TaglibSharp.Tests/raw-samples`, and `examples/covers` in the source checkout.
+The test project records its source directory as assembly metadata, so fixture
+paths do not depend on the build output layout (including `UseArtifactsOutput`).
+Temporary sample files remain under `samples/<runtime-version>`, which the test
+path helper creates automatically.
+
 ### Build in IDE (Visual Studio, Visual Studio for Mac, Rider, etc):
 
 You can open it in Visual Studio by using TaglibSharp.sln
