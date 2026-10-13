@@ -129,9 +129,20 @@ namespace TagLib.Id3v2
 		/// </exception>
 		public static Frame CreateFrame (ByteVector data, File file, ref int offset, byte version, bool alreadyUnsynched)
 		{
+			return CreateFrame (data, file, ref offset, version, alreadyUnsynched, null);
+		}
+
+		internal static Frame CreateFrame (ByteVector data, File file, ref int offset, byte version,
+			bool alreadyUnsynched, TagDataStream reader)
+		{
 			int position = 0;
 
-			if (data == null) {
+			if (reader != null) {
+				reader.SkipTo (offset);
+				data = reader.ReadBlock ((int)FrameHeader.Size (version));
+				if (data.Count == 0)
+					return null;
+			} else if (data == null) {
 				file.Seek (offset);
 				data = file.ReadBlock ((int)FrameHeader.Size (version));
 			} else {
@@ -146,7 +157,13 @@ namespace TagLib.Id3v2
 			if (data[position] == 0)
 				return null;
 
+			if (reader != null && data.Count < FrameHeader.Size (version))
+				throw new CorruptFileException ("Frame header incomplete.");
+
 			FrameHeader header = new FrameHeader (data.Mid (position, (int)FrameHeader.Size (version)), version);
+
+			if (reader != null && header.FrameSize > reader.Remaining)
+				throw new CorruptFileException ("Frame extends beyond the tag data.");
 
 			int fileposition = offset + (int)FrameHeader.Size (version);
 			offset += (int)(header.FrameSize + FrameHeader.Size (version));
@@ -198,7 +215,20 @@ namespace TagLib.Id3v2
 
 			// Lazy objects loading handling
 
-			if (file != null) {
+			if (reader != null) {
+				int size = (int)header.FrameSize;
+				if (header.FrameId == FrameType.APIC || header.FrameId == FrameType.GEOB) {
+					long start = reader.PhysicalPosition;
+					reader.Skip (size);
+					return new AttachmentFrame (file.FileAbstraction, start,
+						reader.PhysicalPosition - start, header, version, alreadyUnsynched);
+				}
+
+				var fields = reader.ReadBlock (size);
+				if (fields.Count != size)
+					throw new CorruptFileException ("Frame data incomplete.");
+				data.Add (fields);
+			} else if (file != null) {
 
 				// Attached Picture (frames 4.14)
 				// General Encapsulated Object (frames 4.15)

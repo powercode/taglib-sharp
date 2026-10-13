@@ -574,6 +574,44 @@ public class ByteVectorTest
 	}
 
 	[TestMethod]
+	public void MidReturnsIndependentStorage ()
+	{
+		ByteVector source = "ABCDE";
+		var result = source.Mid (1, 3);
+
+		source[1] = (byte)'X';
+		Assert.AreEqual (ByteVector.FromString ("BCD", StringType.UTF8), result);
+		result[1] = (byte)'Y';
+		Assert.AreEqual (ByteVector.FromString ("AXCDE", StringType.UTF8), source);
+	}
+
+	[TestMethod]
+	[DataRow (0)]
+	[DataRow (1)]
+	[DataRow (65536)]
+	[DataRow (1048576)]
+	public void MidAllocatesOnlyFinalStorage (int length)
+	{
+		byte[] bytes = new byte[length + 13];
+		new Random (42).NextBytes (bytes);
+		var source = new ByteVector (bytes);
+		for (int i = 0; i < 10; ++i)
+			source.Mid (13, length);
+
+		long before = GC.GetAllocatedBytesForCurrentThread ();
+		var baseline = new ByteVector (bytes.AsSpan (13, length));
+		long baselineAllocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		before = GC.GetAllocatedBytesForCurrentThread ();
+		var result = source.Mid (13, length);
+		long allocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		Assert.AreEqual (baselineAllocation, allocation);
+		Assert.AreEqual (baseline, result);
+		GC.KeepAlive (baseline);
+	}
+
+	[TestMethod]
 	[DataRow (-1, 0, "startIndex", "offset", -1)]
 	[DataRow (27, 0, "startIndex", "offset", 27)]
 	[DataRow (int.MaxValue, 0, "startIndex", "offset", int.MaxValue)]

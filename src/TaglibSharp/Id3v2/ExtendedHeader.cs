@@ -92,7 +92,14 @@ namespace TagLib.Id3v2
 			if (data == null)
 				throw new ArgumentNullException (nameof (data));
 
-			size = (version == 3 ? 4u : 0u) + SynchData.ToUInt (data.Mid (0, 4));
+			if (data.Count < 4)
+				throw new CorruptFileException ("Extended header incomplete.");
+
+			var sizeData = data.Mid (0, 4);
+			uint length = version == 3 ? sizeData.ToUInt () : SynchData.ToUInt (sizeData);
+			if (version == 3 && length > uint.MaxValue - 4)
+				throw new CorruptFileException ("Invalid extended header size.");
+			size = (version == 3 ? 4u : 0u) + length;
 		}
 
 		#region ICloneable

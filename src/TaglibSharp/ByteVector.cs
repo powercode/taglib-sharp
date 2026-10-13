@@ -452,6 +452,10 @@ namespace TagLib
 		///    A <see cref="int" /> value specifying the number of
 		///    elements to copy from the current instance.
 		/// </param>
+		/// <remarks>
+		///    Copies directly into independent backing storage without
+		///    allocating an intermediate array.
+		/// </remarks>
 		/// <exception cref="ArgumentOutOfRangeException">
 		///    <paramref name="startIndex" /> is less than zero or
 		///    greater than <see cref="Count" />. OR
@@ -468,14 +472,7 @@ namespace TagLib
 			if (length == 0)
 				return new ByteVector ();
 
-			if (startIndex + length > this.data.Count)
-				length = this.data.Count - startIndex;
-
-			byte[] data = new byte[length];
-
-			this.data.CopyTo (startIndex, data, 0, length);
-
-			return data;
+			return new ByteVector (CollectionsMarshal.AsSpan (data).Slice (startIndex, length));
 		}
 
 		/// <summary>

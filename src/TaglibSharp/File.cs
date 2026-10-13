@@ -53,12 +53,19 @@ namespace TagLib
 		Average = 2,
 
 		/// <summary>
-		///    Use the <see cref="PictureLazy"/> class in the
-		///    the property <see cref="Tag.Pictures"/>.
-		///    This will avoid loading picture content when reading the Tag.
-		///    Picture will be read lazily, when the picture content is
-		///    accessed.
+		///    Defer loading picture content in formats that support lazy
+		///    pictures. Combine with <see cref="Average"/> to also read
+		///    media properties such as duration.
 		/// </summary>
+		/// <remarks>
+		///    Accessing picture properties may load the content, including
+		///    properties such as the description or MIME type. ID3v2
+		///    attachments remain lazy even with extended headers,
+		///    tag-wide unsynchronisation, or small tags. Unsynchronised
+		///    tag bodies must still be scanned, using a bounded buffer.
+		///    The file abstraction must remain available when loading
+		///    deferred content.
+		/// </remarks>
 		PictureLazy = 4
 	}
 
@@ -627,6 +634,15 @@ namespace TagLib
 			Mode = AccessMode.Read;
 
 			return ByteVector.FromStream (file_stream, length);
+		}
+
+		/// <summary>
+		///    Reads into caller-owned storage, returning only the bytes read.
+		/// </summary>
+		internal int ReadBlock (Span<byte> destination)
+		{
+			Mode = AccessMode.Read;
+			return file_stream.ReadAtLeast (destination, destination.Length, throwOnEndOfStream: false);
 		}
 
 		/// <summary>

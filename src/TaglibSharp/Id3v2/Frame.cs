@@ -507,7 +507,7 @@ namespace TagLib.Id3v2
 		/// <remarks>
 		///    This method is implemented by rendering the current
 		///    instance as an ID3v2.4 frame and using <see
-		///    cref="FrameFactory.CreateFrame" /> to create a new
+		///    cref="FrameFactory.CreateFrame(ByteVector,File,ref int,byte,bool)" /> to create a new
 		///    frame. As such, this method should be overridden by
 		///    child classes.
 		/// </remarks>

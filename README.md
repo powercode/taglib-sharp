@@ -43,6 +43,33 @@ tfile.Tag.Title = "my new title";
 tfile.Save();
 ```
 
+### Read metadata without eagerly loading artwork
+
+For metadata-only imports, enable lazy pictures in supported formats:
+
+```C#
+using var tfile = TagLib.File.Create(
+    @"C:\My audio.mp3",
+    TagLib.ReadStyle.Average | TagLib.ReadStyle.PictureLazy);
+string title = tfile.Tag.Title;
+TimeSpan duration = tfile.Properties.Duration;
+```
+
+If media properties such as duration are not needed, use
+`TagLib.ReadStyle.PictureLazy` alone. `ReadStyle.None` skips media properties,
+but does not enable lazy pictures.
+
+Lazy-picture support is format-dependent. ID3v2 attachments stay lazy with
+extended headers, tag-wide unsynchronisation, and small tags. Tag-wide
+unsynchronisation still requires scanning the tag bytes, but uses a pooled
+4 KiB buffer rather than allocating the whole tag and copying its attachments.
+Otherwise, attachment payloads are skipped by seeking.
+
+Accessing picture properties (including descriptions and MIME types), or saving,
+can load the artwork. Keep the source file and its file abstraction available
+and unchanged until deferred content has been loaded. Lazy loading does not
+discard pictures or guarantee that all artwork is skipped in other formats.
+
 ### Read/write metadata from an Image
 ```C#
 var tfile = TagLib.File.Create(@"C:\My picture.jpg");

@@ -117,6 +117,8 @@ namespace TagLib.Id3v2
 		/// </summary>
 		readonly long stream_size = -1;
 
+		readonly bool resynchronise;
+
 		#endregion
 
 
@@ -296,6 +298,13 @@ namespace TagLib.Id3v2
 			stream_offset = offset;
 			stream_size = size;
 			raw_version = version;
+		}
+
+		internal AttachmentFrame (File.IFileAbstraction abstraction, long offset, long size,
+			FrameHeader header, byte version, bool resynchronise)
+			: this (abstraction, offset, size, header, version)
+		{
+			this.resynchronise = resynchronise;
 		}
 
 
@@ -694,18 +703,7 @@ namespace TagLib.Id3v2
 					stream = file.ReadStream;
 					stream.Seek (stream_offset, SeekOrigin.Begin);
 
-					int count = 0, read = 0, needed = (int)stream_size;
-					byte[] buffer = new byte[needed];
-
-					do {
-						count = stream.Read (buffer, read, needed);
-
-						read += count;
-						needed -= count;
-					} while (needed > 0 && count != 0);
-
-
-					data = new ByteVector (buffer, read);
+					data = ByteVector.FromStream (stream, checked ((int)stream_size));
 				} else {
 					stream = file.ReadStream;
 					stream.Seek (stream_offset, SeekOrigin.Begin);
@@ -720,6 +718,9 @@ namespace TagLib.Id3v2
 
 				file = null;
 			}
+
+			if (resynchronise)
+				SynchData.ResynchByteVector (data);
 
 			// Decode the raw data if required, by using FieldData
 			raw_data = FieldData (data, -(int)FrameHeader.Size (raw_version), raw_version);

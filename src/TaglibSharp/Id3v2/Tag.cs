@@ -888,33 +888,36 @@ namespace TagLib.Id3v2
 			bool fullTagUnsynch = (header.MajorVersion < 4) &&
 				(header.Flags & HeaderFlags.Unsynchronisation) != 0;
 
-			// Avoid to load all the ID3 tag if PictureLazy enabled and size is 
-			// significant enough (ID3v4 and later only)
-			if (data == null &&
-				(fullTagUnsynch ||
-				header.TagSize < 1024 ||
-				(style & ReadStyle.PictureLazy) == 0 ||
-				(header.Flags & HeaderFlags.ExtendedHeader) != 0)) {
+			using var reader = data == null && (style & ReadStyle.PictureLazy) != 0
+				? new TagDataStream (file, position, header.TagSize, fullTagUnsynch)
+				: null;
+
+			if (data == null && reader == null) {
 				file.Seek (position);
 				data = file.ReadBlock ((int)header.TagSize);
 			}
 
-			if (fullTagUnsynch)
+			if (fullTagUnsynch && reader == null)
 				SynchData.ResynchByteVector (data);
 
-			int frame_data_position = data != null ? 0 : (int)position;
-			int frame_data_endposition = (data != null ? data.Count : (int)header.TagSize)
-				+ frame_data_position - (int)FrameHeader.Size (header.MajorVersion);
+			int frameDataPosition = 0;
+			int frameDataEndPosition = (data != null ? data.Count : (int)header.TagSize)
+				- (int)FrameHeader.Size (header.MajorVersion);
 
 
 			// Check for the extended header (ID3v2 only)
 
 			if ((header.Flags & HeaderFlags.ExtendedHeader) != 0) {
-				extended_header = new ExtendedHeader (data, header.MajorVersion);
+				extended_header = new ExtendedHeader (reader != null ? reader.ReadBlock (4) : data, header.MajorVersion);
 
-				if (extended_header.Size <= data.Count) {
-					frame_data_position += (int)extended_header.Size;
-					frame_data_endposition -= (int)extended_header.Size;
+				if (reader != null) {
+					uint minimumSize = header.MajorVersion == 3 ? 10u : 6u;
+					if (extended_header.Size < minimumSize || extended_header.Size > header.TagSize)
+						throw new CorruptFileException ("Invalid extended header size.");
+					reader.Skip ((int)extended_header.Size - 4);
+					frameDataPosition = (int)extended_header.Size;
+				} else if (extended_header.Size <= data.Count) {
+					frameDataPosition += (int)extended_header.Size;
 				}
 			}
 
@@ -926,12 +929,12 @@ namespace TagLib.Id3v2
 			TextInformationFrame tdat = null;
 			TextInformationFrame time = null;
 
-			while (frame_data_position < frame_data_endposition) {
+			while (reader != null ? reader.Remaining > 0 : frameDataPosition < frameDataEndPosition) {
 
 				Frame frame;
 
 				try {
-					frame = FrameFactory.CreateFrame (data, file, ref frame_data_position, header.MajorVersion, fullTagUnsynch);
+					frame = FrameFactory.CreateFrame (data, file, ref frameDataPosition, header.MajorVersion, fullTagUnsynch, reader);
 				} catch (NotImplementedException) {
 					continue;
 				} catch (CorruptFileException) {

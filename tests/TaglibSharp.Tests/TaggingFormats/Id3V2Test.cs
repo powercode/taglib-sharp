@@ -1225,6 +1225,99 @@ public class Id3V2Test
 	}
 
 	[TestMethod]
+	[DataRow ((byte)2, PictureType.FrontCover)]
+	[DataRow ((byte)3, PictureType.FrontCover)]
+	[DataRow ((byte)4, PictureType.FrontCover)]
+	[DataRow ((byte)2, PictureType.NotAPicture)]
+	[DataRow ((byte)3, PictureType.NotAPicture)]
+	[DataRow ((byte)4, PictureType.NotAPicture)]
+	public void FrameFactoryAllocatesOnlyOneAttachmentBuffer (byte version, PictureType type)
+	{
+		var original = new AttachmentFrame {
+			Type = type,
+			MimeType = "image/png",
+			Filename = "cover.png",
+			Description = "cover",
+			TextEncoding = StringType.Latin1,
+			Data = new ByteVector (1048576, 42)
+		};
+		var rendered = original.Render (version);
+		var source = new ByteVector (13);
+		source.Add (rendered);
+		for (int i = 0; i < 10; ++i) {
+			int warmupOffset = 13;
+			FrameFactory.CreateFrame (source, null, ref warmupOffset, version, false);
+		}
+
+		int offset = 13;
+		long before = GC.GetAllocatedBytesForCurrentThread ();
+		var frame = (AttachmentFrame)FrameFactory.CreateFrame (source, null, ref offset, version, false);
+		long allocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		Assert.IsLessThan (rendered.Count + 16384L, allocation,
+			$"Expected one attachment-sized buffer plus small headers, allocated {allocation} bytes.");
+		Assert.AreEqual (source.Count, offset);
+		Assert.AreEqual (rendered, frame.Render (version));
+		source[source.Count - 1] = 99;
+		source.Clear ();
+		Assert.AreEqual (original.MimeType, frame.MimeType);
+		Assert.AreEqual (original.Description, frame.Description);
+		Assert.AreEqual (original.Type, frame.Type);
+		if (type == PictureType.NotAPicture)
+			Assert.AreEqual (original.Filename, frame.Filename);
+		Assert.AreEqual (original.Data, frame.Data);
+		frame.Data[0] = 99;
+		Assert.AreEqual ((byte)42, original.Data[0]);
+	}
+
+	[TestMethod]
+	[DataRow ((byte)2, PictureType.FrontCover)]
+	[DataRow ((byte)3, PictureType.FrontCover)]
+	[DataRow ((byte)4, PictureType.FrontCover)]
+	[DataRow ((byte)2, PictureType.NotAPicture)]
+	[DataRow ((byte)3, PictureType.NotAPicture)]
+	[DataRow ((byte)4, PictureType.NotAPicture)]
+	public void MetadataOnlyReadDefersLargeAttachments (byte version, PictureType type)
+	{
+		var original = new Tag {
+			Version = version,
+			Title = "title before attachment"
+		};
+		var attachment = new AttachmentFrame {
+			Type = type,
+			MimeType = "image/png",
+			Filename = "cover.png",
+			Description = "cover",
+			Data = new ByteVector (1048576, 42)
+		};
+		original.AddFrame (attachment);
+		original.Album = "album after attachment";
+		byte[] bytes = original.Render ().Data;
+		var abstraction = new MemoryFileAbstraction (bytes.Length, bytes);
+		for (int i = 0; i < 10; ++i) {
+			using var warmup = new TagLib.Mpeg.AudioFile (abstraction, ReadStyle.PictureLazy);
+			_ = warmup.Tag.Title;
+			_ = warmup.Tag.Album;
+		}
+
+		long before = GC.GetAllocatedBytesForCurrentThread ();
+		using var file = new TagLib.Mpeg.AudioFile (abstraction, ReadStyle.PictureLazy);
+		string title = file.Tag.Title;
+		string album = file.Tag.Album;
+		long allocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+		Assert.IsLessThan (65536L, allocation,
+			$"Metadata-only reading allocated {allocation} bytes for a 1 MiB attachment.");
+		Assert.AreEqual (original.Title, title);
+		Assert.AreEqual (original.Album, album);
+		var tag = (Tag)file.GetTag (TagTypes.Id3v2);
+		var frame = tag.GetFrames<AttachmentFrame> ().Single ();
+		Assert.IsFalse (frame.IsLoaded);
+		Assert.AreEqual (attachment.Data, frame.Data);
+		Assert.IsTrue (frame.IsLoaded);
+	}
+
+	[TestMethod]
 	public void TestCommentsFrame ()
 	{
 		string desc = "description";
