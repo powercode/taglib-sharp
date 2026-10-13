@@ -610,6 +610,8 @@ namespace TagLib
 		///    <para>This method reads the block of data at the current
 		///    seek position. To change the seek position, use <see
 		///    cref="Seek(long,SeekOrigin)" />.</para>
+		///    <para>Reads directly into the returned vector's backing storage.
+		///    If the stream ends early, only the bytes read are returned.</para>
 		/// </remarks>
 		/// <exception cref="ArgumentException">
 		///    <paramref name="length" /> is less than zero.
@@ -624,18 +626,7 @@ namespace TagLib
 
 			Mode = AccessMode.Read;
 
-			byte[] buffer = new byte[length];
-
-			int count = 0, read = 0, needed = length;
-
-			do {
-				count = file_stream.Read (buffer, read, needed);
-
-				read += count;
-				needed -= count;
-			} while (needed > 0 && count != 0);
-
-			return new ByteVector (buffer, read);
+			return ByteVector.FromStream (file_stream, length);
 		}
 
 		/// <summary>

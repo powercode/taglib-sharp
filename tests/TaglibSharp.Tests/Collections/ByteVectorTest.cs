@@ -96,7 +96,8 @@ public class ByteVectorTest
 		byte[] source = new byte[length];
 		new Random (42).NextBytes (source);
 		using var stream = new TestReadStream (source, canSeek, maxRead);
-		var method = typeof (ByteVector).GetMethod ("FromStream", BindingFlags.Static | BindingFlags.NonPublic);
+		var method = typeof (ByteVector).GetMethod ("FromStream", BindingFlags.Static | BindingFlags.NonPublic,
+			new[] { typeof (Stream), typeof (byte[]).MakeByRefType (), typeof (bool) });
 		object[] arguments = { stream, null, copyFirstChunk };
 
 		var vector = (ByteVector)method.Invoke (null, arguments);

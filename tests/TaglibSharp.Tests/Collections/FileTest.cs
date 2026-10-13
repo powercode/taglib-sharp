@@ -28,6 +28,109 @@ namespace TaglibSharp.Tests.Collections
 		}
 
 		[TestMethod]
+		[DataRow (0, 10, 7)]
+		[DataRow (1, 10, 7)]
+		[DataRow (10, 10, 7)]
+		[DataRow (20, 10, 7)]
+		[DataRow (20, 0, 7)]
+		[DataRow (4096, 8193, 4096)]
+		[DataRow (8193, 8193, 7)]
+		[DataRow (10000, 8193, 4096)]
+		public void ReadBlockHandlesShortReadsAndEndOfStream (int requested, int available, int maxRead)
+		{
+			byte[] source = new byte[available + 13];
+			new Random (42).NextBytes (source);
+			using var stream = new BlockReadStream (source, maxRead);
+			stream.Position = 13;
+			using var file = new TestFile (new StreamAbstraction (stream));
+
+			var result = file.ReadBlock (requested);
+
+			int expectedLength = Math.Min (requested, available);
+			Assert.AreSequenceEqual (source.AsSpan (13, expectedLength).ToArray (), result.Data);
+			Assert.AreEqual (13L + expectedLength, stream.Position);
+			Assert.AreEqual (requested > available ? 1 : 0, stream.EndOfStreamReads);
+			Assert.IsTrue (stream.CanRead);
+			if (requested == 0) {
+				Assert.AreEqual (0, stream.ReadCalls);
+				Assert.AreEqual (File.AccessMode.Closed, file.Mode);
+			}
+		}
+
+		[TestMethod]
+		public void ReadBlockRejectsNegativeLengthWithoutOpeningStream ()
+		{
+			using var file = CreateFile (10);
+			var exception = Assert.ThrowsExactly<ArgumentException> (() => file.ReadBlock (-1));
+			Assert.AreEqual ("length", exception.ParamName);
+			Assert.AreEqual (File.AccessMode.Closed, file.Mode);
+		}
+
+		[TestMethod]
+		public void ReadBlockPropagatesReadErrors ()
+		{
+			using var stream = new BlockReadStream (new byte[20], 7) { FailAfter = 7 };
+			using var file = new TestFile (new StreamAbstraction (stream));
+			Assert.ThrowsExactly<IOException> (() => file.ReadBlock (20));
+			Assert.AreEqual (7L, stream.Position);
+			Assert.IsTrue (stream.CanRead);
+		}
+
+		[TestMethod]
+		[DataRow (0)]
+		[DataRow (100)]
+		[DataRow (65536)]
+		public void ReadBlockAllocatesOnlyBackingStorage (int available)
+		{
+			byte[] source = new byte[65536];
+			using var stream = new MemoryStream (source, 0, available, false);
+			using var file = new TestFile (new StreamAbstraction (stream));
+			for (int i = 0; i < 100; ++i) {
+				stream.Position = 0;
+				file.ReadBlock (source.Length);
+			}
+
+			long before = GC.GetAllocatedBytesForCurrentThread ();
+			var baseline = new ByteVector (source.AsSpan ());
+			long baselineAllocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+			stream.Position = 0;
+			before = GC.GetAllocatedBytesForCurrentThread ();
+			var result = file.ReadBlock (source.Length);
+			long allocation = GC.GetAllocatedBytesForCurrentThread () - before;
+
+			Assert.AreEqual (baselineAllocation, allocation);
+			Assert.AreEqual (available, result.Count);
+			GC.KeepAlive (baseline);
+		}
+
+		sealed class StreamAbstraction (Stream stream) : File.IFileAbstraction
+		{
+			public string Name => "MEMORY";
+			public Stream ReadStream => stream;
+			public Stream WriteStream => stream;
+			public void CloseStream (Stream stream) => stream.Dispose ();
+		}
+
+		sealed class BlockReadStream (byte[] source, int maxRead) : MemoryStream (source, false)
+		{
+			public int ReadCalls { get; private set; }
+			public int EndOfStreamReads { get; private set; }
+			public long FailAfter { get; init; } = long.MaxValue;
+
+			public override int Read (Span<byte> buffer)
+			{
+				++ReadCalls;
+				if (Position >= FailAfter)
+					throw new IOException ("Test read failure.");
+				int read = base.Read (buffer[..Math.Min (buffer.Length, maxRead)]);
+				if (read == 0 && ++EndOfStreamReads > 1)
+					throw new IOException ("Reading continued after EOF.");
+				return read;
+			}
+		}
+
+		[TestMethod]
 		public void RFind ()
 		{
 			// file1

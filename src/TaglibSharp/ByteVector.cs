@@ -2465,6 +2465,22 @@ namespace TagLib
 		}
 
 		/// <summary>
+		///    Reads up to <paramref name="length" /> bytes directly into
+		///    the new vector's backing storage without closing the stream.
+		/// </summary>
+		internal static ByteVector FromStream (Stream stream, int length)
+		{
+			ArgumentNullException.ThrowIfNull (stream);
+			ArgumentOutOfRangeException.ThrowIfNegative (length);
+
+			var vector = new ByteVector (length, ReadOnlySpan<byte>.Empty);
+			int read = stream.ReadAtLeast (CollectionsMarshal.AsSpan (vector.data),
+				length, throwOnEndOfStream: false);
+			CollectionsMarshal.SetCount (vector.data, read);
+			return vector;
+		}
+
+		/// <summary>
 		///    Creates a new instance of <see cref="ByteVector" /> by
 		///    reading in the contents of a specified stream.
 		/// </summary>
