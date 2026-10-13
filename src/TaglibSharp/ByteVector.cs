@@ -158,6 +158,8 @@ namespace TagLib
 		/// </summary>
 		static bool use_broken_latin1;
 
+		static Encoding latin1_encoding = Encoding.GetEncoding ("latin1");
+
 		/// <summary>
 		///    Contains a one byte text delimiter.
 		/// </summary>
@@ -516,11 +518,22 @@ namespace TagLib
 
 			if (pattern.Count == 1) {
 				byte p = pattern[0];
+				if (byteAlign == 1)
+					return data.IndexOf (p, offset);
+
 				for (int i = offset; i < data.Count;
 					i += byteAlign)
 					if (data[i] == p)
 						return i;
 				return -1;
+			}
+
+
+			if (byteAlign == 1) {
+				ReadOnlySpan<byte> source = CollectionsMarshal.AsSpan (data);
+				ReadOnlySpan<byte> needle = CollectionsMarshal.AsSpan (pattern.data);
+				int index = source.Slice (offset).IndexOf (needle);
+				return index < 0 ? -1 : offset + index;
 			}
 
 			int[] last_occurrence = new int[256];
@@ -644,11 +657,21 @@ namespace TagLib
 
 			if (pattern.Count == 1) {
 				byte p = pattern[0];
+				if (byteAlign == 1)
+					return data.LastIndexOf (p, Count - offset - 1);
+
 				for (int i = Count - offset - 1; i >= 0;
 					i -= byteAlign)
 					if (data[i] == p)
 						return i;
 				return -1;
+			}
+
+
+			if (byteAlign == 1) {
+				ReadOnlySpan<byte> source = CollectionsMarshal.AsSpan (data);
+				ReadOnlySpan<byte> needle = CollectionsMarshal.AsSpan (pattern.data);
+				return source.Slice (0, Count - offset).LastIndexOf (needle);
 			}
 
 			int[] first_occurrence = new int[256];
@@ -1460,21 +1483,16 @@ namespace TagLib
 			ArgumentOutOfRangeException.ThrowIfNegative (count);
 			ArgumentOutOfRangeException.ThrowIfGreaterThan (count, Count - offset);
 
-			if (offset < 0 || offset > Count)
-				throw new ArgumentOutOfRangeException (nameof (offset));
-
-			if (count < 0 || count + offset > Count)
-				throw new ArgumentOutOfRangeException (nameof (count));
 
 			var bom = type == StringType.UTF16 &&
-				data.Count - offset > 1 ? Mid (offset, 2) : null;
+			          data.Count - offset > 1 ? Mid (offset, 2) : null;
 
+			var listSpan = CollectionsMarshal.AsSpan (data);
 			string s = StringTypeToEncoding (type, bom)
-				.GetString (Data, offset, count);
-
+				.GetString (listSpan.Slice (offset, count));
 			// UTF16 BOM
 			if (s.Length != 0 && (s[0] == 0xfffe || s[0] == 0xfeff))
-				return s.Substring (1);
+				return s[1..];
 
 			return s;
 		}
@@ -2483,7 +2501,7 @@ namespace TagLib
 				return Encoding.Default;
 
 			try {
-				return Encoding.GetEncoding ("latin1");
+				return latin1_encoding;
 			} catch (ArgumentException) {
 				return Encoding.UTF8;
 			}
